@@ -205,60 +205,57 @@ if st.session_state.data_loaded:
         eq_string_input = st.text_input("Equation:", key="equation_input")
         fit_button = st.button("Perform Fit", key="fit_button")
 
-        if fit_button and eq_string_input:
-            st.session_state.final_fig = None # Clear previous final figure
-            with st.spinner("Performing iterative fit... Please wait."):
-                # --- Outer try block for setup and loop ---
+if fit_button and eq_string_input:
+    st.session_state.final_fig = None
+    with st.spinner("Performing iterative fit... Please wait."):
+        try:
+            processed_eq_string, params = validate_and_parse_equation(eq_string_input)
+            fit_func = create_fit_function(processed_eq_string, params)
+            x_data = st.session_state.x_data; y_data = st.session_state.y_data
+            x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
+            popt_current = None; pcov_current = None
+            total_err_current = y_err_safe # Start with initial safeguarded y_err
+            fit_successful = True
+            fit_progress_area = st.empty()
+
+            # --- Iterative Fitting Loop ---
+            for i in range(4):
+                fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
+                p0 = popt_current if i > 0 else None
+
+                # Debug Print (Keep for now)
+                with st.expander(f"Debug Info for Fit {fit_num}", expanded=False):
+                    st.write(f"**Inputs:**"); st.write(f"  x_data[:5]: `{x_data[:5]}`"); st.write(f"  y_data[:5]: `{y_data[:5]}`")
+                    st.write(f"  sigma[:5]: `{total_err_current[:5]}`"); st.write(f"  sigma min/max: `{np.min(total_err_current):.3g}, {np.max(total_err_current):.3g}`"); st.write(f"  p0: `{p0}`")
+
+                # --- Inner try for curve_fit call ---
                 try:
-                    processed_eq_string, params = validate_and_parse_equation(eq_string_input)
-                    fit_func = create_fit_function(processed_eq_string, params)
-                    x_data = st.session_state.x_data; y_data = st.session_state.y_data
-                    x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
-                    popt_current = None; pcov_current = None
-                    total_err_current = y_err_safe # Start with initial y_err
-                    fit_successful = True
-                    fit_progress_area = st.empty()
+                    # <<< MODIFIED curve_fit call: added .copy() and bounds >>>
+                    popt_current, pcov_current = curve_fit(
+                        fit_func, x_data, y_data,
+                        sigma=total_err_current.copy(), # Pass a copy
+                        absolute_sigma=True,
+                        p0=p0,
+                        maxfev=5000 + i*2000,
+                        bounds=(-np.inf, np.inf) # Add wide bounds
+                    )
+                    # Check covariance after successful fit
+                    if pcov_current is None or not np.all(np.isfinite(pcov_current)):
+                        st.warning(f"Fit {fit_num} succeeded (popt={popt_current}) but cov matrix non-finite. Stopping iteration.")
+                        fit_successful = False; break
 
-                    # --- Iterative Fitting Loop ---
-                    for i in range(4):
-                        fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
-                        p0 = popt_current if i > 0 else None
+                # Catch specific errors from curve_fit
+                except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
+                except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num} (failed convergence?): {fit_error}"); fit_successful = False; break
+                except Exception as fit_error: st.error(f"Unexpected error DURING curve_fit {fit_num}: {fit_error} ({type(fit_error).__name__})"); fit_successful = False; break
+                # --- End Inner try ---
 
-                        # --- Debug Print Before curve_fit ---
-                        # Use st.expander for less clutter by default
-                        with st.expander(f"Debug Info for Fit {fit_num}", expanded=False):
-                            st.write(f"**Inputs:**")
-                            st.write(f"  x_data[:5]: `{x_data[:5]}`")
-                            st.write(f"  y_data[:5]: `{y_data[:5]}`")
-                            st.write(f"  sigma[:5]: `{total_err_current[:5]}`")
-                            st.write(f"  sigma min/max: `{np.min(total_err_current):.3g}, {np.max(total_err_current):.3g}`")
-                            st.write(f"  p0: `{p0}`")
-
-                        # --- Inner try for curve_fit call ---
-                        try:
-                            popt_current, pcov_current = curve_fit(
-                                fit_func, x_data, y_data,
-                                sigma=total_err_current,
-                                absolute_sigma=True,
-                                p0=p0,
-                                maxfev=5000 + i*2000
-                            )
-                            # Check covariance *after* successful fit
-                            if pcov_current is None or not np.all(np.isfinite(pcov_current)):
-                                st.warning(f"Fit {fit_num} succeeded (popt={popt_current}) but cov matrix non-finite. Stopping iteration.")
-                                fit_successful = False; break
-
-                        # Catch specific errors from curve_fit
-                        except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num} (failed convergence?): {fit_error}"); fit_successful = False; break
-                        except Exception as fit_error: st.error(f"Unexpected error DURING curve_fit {fit_num}: {fit_error} ({type(fit_error).__name__})"); fit_successful = False; break
-                        # --- End Inner try ---
-
-                        # Recalculate error if not last fit AND previous fit was successful
-                        if i < 3 and fit_successful:
-                            slopes = numerical_derivative(fit_func, x_data, popt_current)
-                            total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
-                            total_err_current = safeguard_errors(np.sqrt(total_err_sq)) # Use function
+                # Recalculate error if not last fit AND previous fit was successful
+                if i < 3 and fit_successful:
+                    slopes = numerical_derivative(fit_func, x_data, popt_current)
+                    total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
+                    total_err_current = safeguard_errors(np.sqrt(total_err_sq)) # Use function
+                    
                     # --- End Iterative Loop ---
 
                     fit_progress_area.empty()
@@ -288,12 +285,12 @@ if st.session_state.data_loaded:
                     st.rerun() # Rerun ONLY after successful completion to display results
 
                 # --- Outer error handling block ---
-                except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
-                except SyntaxError as e_setup: st.error(f"Syntax Error: {e_setup}")
-                except Exception as e_setup: # Catch any other exception during setup or loop
-                    st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})")
-                    import traceback
-                    st.error(traceback.format_exc()) # Show full traceback for unexpected errors
+            except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
+            except SyntaxError as e_setup: st.error(f"Syntax Error: {e_setup}")
+            except Exception as e_setup:
+                st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})")
+                import traceback
+                st.error(traceback.format_exc())
 
     else: # If data is loaded AND results exist, display them
         # --- Display Results Section ---
