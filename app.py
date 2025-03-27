@@ -128,7 +128,7 @@ def {func_name}(x, {param_str}):
         st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})"); raise RuntimeError("Test call failed.") from e_test
 
     return created_func
-# <<< END MODIFIED create_fit_function >>>
+    # <<< END MODIFIED create_fit_function >>>
 
 
 def numerical_derivative(func, x, params, h=1e-7):
