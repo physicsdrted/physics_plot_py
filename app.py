@@ -37,12 +37,13 @@ def validate_and_parse_equation(eq_string):
 # <<< MODIFIED create_fit_function >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Corrected scope for 'result' variable."""
+       Fallback: Initialize result outside main try block."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
     exec_globals = {'np': np, 'ALLOWED_NP_FUNCTIONS': ALLOWED_NP_FUNCTIONS, 'eq_string': eq_string, 'params': params}
 
+    # Code for the function to be created by exec
     func_code = f"""
 import numpy as np
 import sys
@@ -55,7 +56,7 @@ def _debug_print(*args, **kwargs):
     print("DEBUG:", *args, file=sys.stderr, **kwargs)
 
 def {func_name}(x, {param_str}):
-    # <<< Initialize result with a default BEFORE the eval try block >>>
+    # <<< Initialize result OUTSIDE the main try block >>>
     result = np.nan
     try:
         # 1. Build locals & globals
@@ -63,18 +64,21 @@ def {func_name}(x, {param_str}):
         for p_name in _PARAMS: eval_locals[p_name] = local_args[p_name]
         eval_globals = {{'np': np}}; eval_globals.update(_ALLOWED_NP_FUNCTIONS); eval_globals['__builtins__'] = {{}}
 
-        _debug_print("--- Inside {func_name} ---"); _debug_print("Equation:", repr(_EQ_STRING)); _debug_print("Globals Keys:", eval_globals.keys()); _debug_print("Locals:", eval_locals)
+        # _debug_print("--- Inside {func_name} ---"); # Optional prints
+        # _debug_print("Equation:", repr(_EQ_STRING));
+        # _debug_print("Globals Keys:", eval_globals.keys());
+        # _debug_print("Locals:", eval_locals)
 
         # 2. Call eval, store result or keep NaN on failure
         try:
-            # Assign directly to the 'result' defined in the outer scope
+            # Assign to 'result' which is now defined in the function's top scope
             result = eval(_EQ_STRING, eval_globals, eval_locals)
-            _debug_print("Eval Raw Result:", repr(result))
+            # _debug_print("Eval Raw Result:", repr(result)) # Optional
         except Exception as e_eval:
             _debug_print(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            # 'result' remains np.nan from the initialization above
+            # result remains np.nan from outer initialization
 
-        # 3. Validate and Convert result ('result' now guaranteed to exist)
+        # 3. Validate and Convert result
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
@@ -83,7 +87,9 @@ def {func_name}(x, {param_str}):
         elif isinstance(result, (int, float)): result = float(result)
         # Check if result is STILL not numeric
         elif not isinstance(result, (np.ndarray, float)):
-             _debug_print(f"Result is not numeric type after processing: {type(result)}, value: {repr(result)}")
+             # Simplified debug print - accesses 'result' safely now
+             _debug_print("Result type is not ndarray or float after initial checks.")
+             _debug_print("Value causing issue:", repr(result))
              result = np.nan # Ensure non-numeric results become NaN
 
         # Final check for NaN/Inf before returning
@@ -92,22 +98,28 @@ def {func_name}(x, {param_str}):
             result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
 
-        _debug_print("Returning:", repr(result)); _debug_print("--------------------------")
+        # _debug_print("Returning:", repr(result)); # Optional
         return result
 
     except Exception as e_outer:
+        # This outer except block catches errors in build locals/globals etc.
         _debug_print(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
+        # Fallback return value if outer logic fails
         try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
         except: return np.nan
+
 """
     # --- Debugging: Show generated code --- (Keep this)
     st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
 
     local_namespace = {}
-    try: exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile: raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
-    if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
+    try:
+        exec(func_code, exec_globals, local_namespace) # <<< Error was happening HERE
+    except Exception as e_compile:
+        # This will catch the NameError if it still happens during compilation
+        raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
 
+    if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
     created_func = local_namespace[func_name]
 
     # --- Debugging: Test call --- (Keep this)
@@ -122,6 +134,26 @@ def {func_name}(x, {param_str}):
         st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})"); raise RuntimeError("Test call failed.") from e_test
 
     return created_func
+
+# --- Main App Logic ---
+# ... (Rest of the app.py code remains the same as the previous full version) ...
+# --- Include: ---
+# st.title(...)
+# st.write(...)
+# Session State Init
+# File Uploader
+# File processing logic (if uploaded_file...)
+# Display Data Preview and Initial Plot (if data_loaded...)
+# Fitting Controls OR Results display section (if/else based on fit_results...)
+    # Fitting Button Logic
+        # Outer try/except for setup/loop
+            # Iterative loop
+                # Inner try/except for curve_fit
+            # Process Final Results
+            # Generate Final Plot Figure
+            # st.rerun()
+        # Display Results Section (plot, table, download)
+# Footer
     # <<< END MODIFIED create_fit_function >>>
 
 
