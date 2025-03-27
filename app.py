@@ -37,7 +37,7 @@ def validate_and_parse_equation(eq_string):
 # <<< MODIFIED create_fit_function >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Corrected validation flow after eval."""
+       Corrected scope for 'result' variable."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
@@ -55,6 +55,8 @@ def _debug_print(*args, **kwargs):
     print("DEBUG:", *args, file=sys.stderr, **kwargs)
 
 def {func_name}(x, {param_str}):
+    # <<< Initialize result with a default BEFORE the eval try block >>>
+    result = np.nan
     try:
         # 1. Build locals & globals
         eval_locals = {{'x': x}}; local_args = locals()
@@ -63,48 +65,40 @@ def {func_name}(x, {param_str}):
 
         _debug_print("--- Inside {func_name} ---"); _debug_print("Equation:", repr(_EQ_STRING)); _debug_print("Globals Keys:", eval_globals.keys()); _debug_print("Locals:", eval_locals)
 
-        # 2. Call eval, store result or NaN on failure
+        # 2. Call eval, store result or keep NaN on failure
         try:
+            # Assign directly to the 'result' defined in the outer scope
             result = eval(_EQ_STRING, eval_globals, eval_locals)
             _debug_print("Eval Raw Result:", repr(result))
         except Exception as e_eval:
             _debug_print(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            result = np.nan # Assign NaN if eval fails
+            # 'result' remains np.nan from the initialization above
 
-        # 3. Validate and Convert result (NOW 'result' is guaranteed to exist)
+        # 3. Validate and Convert result ('result' now guaranteed to exist)
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
             result = result.astype(float)
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
-        # Check if result is STILL not numeric (e.g., it started as NaN or was None/string)
-        elif not isinstance(result, (np.ndarray, float)): # Check if it's not array or float now
+        # Check if result is STILL not numeric
+        elif not isinstance(result, (np.ndarray, float)):
              _debug_print(f"Result is not numeric type after processing: {type(result)}, value: {repr(result)}")
              result = np.nan # Ensure non-numeric results become NaN
 
         # Final check for NaN/Inf before returning
         if isinstance(result, np.ndarray):
-            # Check if ALL values are NaN - might indicate total failure
-            if np.all(np.isnan(result)):
-                _debug_print("Warning: Resulting array is all NaNs.")
-            result[~np.isfinite(result)] = np.nan # Ensure only finite numbers or NaN
-        elif not np.isfinite(result):
-             # Handle scalar NaN/Inf
-             result = np.nan
+            if np.all(np.isnan(result)): _debug_print("Warning: Resulting array is all NaNs.")
+            result[~np.isfinite(result)] = np.nan
+        elif not np.isfinite(result): result = np.nan
 
         _debug_print("Returning:", repr(result)); _debug_print("--------------------------")
         return result
 
     except Exception as e_outer:
-        # Catch errors in surrounding logic (unlikely now but keep as safeguard)
         _debug_print(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
-        # Attempt to return NaN array matching input x shape if possible
-        try:
-            return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
-        except: # Fallback if x is not available or invalid
-            return np.nan
-
+        try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
+        except: return np.nan
 """
     # --- Debugging: Show generated code --- (Keep this)
     st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
@@ -119,7 +113,7 @@ def {func_name}(x, {param_str}):
     # --- Debugging: Test call --- (Keep this)
     try:
         st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]); test_params = [1.0] * len(params)
-        test_result = created_func(test_x, *test_params) # Will trigger internal prints
+        test_result = created_func(test_x, *test_params)
         st.write(f"  Test call completed. Check terminal/log for 'DEBUG:' output.")
         st.write(f"  Test call returned: {test_result}")
         if isinstance(test_result, np.ndarray): st.write(f"  Test result shape: {test_result.shape}, dtype: {test_result.dtype}");
