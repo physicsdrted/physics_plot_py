@@ -37,99 +37,82 @@ def validate_and_parse_equation(eq_string):
 # <<< MODIFIED create_fit_function >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Intense debugging inside the generated function - CORRECTED DEBUG PRINT."""
+       Corrected validation flow after eval."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
-    # Variables needed in the global scope where exec runs
     exec_globals = {'np': np, 'ALLOWED_NP_FUNCTIONS': ALLOWED_NP_FUNCTIONS, 'eq_string': eq_string, 'params': params}
 
-    # Code for the function to be created by exec
     func_code = f"""
 import numpy as np
-import sys # Needed for _debug_print
+import sys
 
 _ALLOWED_NP_FUNCTIONS = ALLOWED_NP_FUNCTIONS
 _EQ_STRING = eq_string
 _PARAMS = params
 
-# Use a simple print function proxy for debugging within exec/eval scope
 def _debug_print(*args, **kwargs):
-    print("DEBUG:", *args, file=sys.stderr, **kwargs) # Print to stderr
+    print("DEBUG:", *args, file=sys.stderr, **kwargs)
 
 def {func_name}(x, {param_str}):
-    result = np.nan # Default result
     try:
-        # 1. Build locals
-        eval_locals = {{'x': x}}
-        local_args = locals()
-        for p_name in _PARAMS:
-            eval_locals[p_name] = local_args[p_name]
+        # 1. Build locals & globals
+        eval_locals = {{'x': x}}; local_args = locals()
+        for p_name in _PARAMS: eval_locals[p_name] = local_args[p_name]
+        eval_globals = {{'np': np}}; eval_globals.update(_ALLOWED_NP_FUNCTIONS); eval_globals['__builtins__'] = {{}}
 
-        # 2. Build globals for eval
-        eval_globals = {{'np': np}}
-        eval_globals.update(_ALLOWED_NP_FUNCTIONS)
-        eval_globals['__builtins__'] = {{}}
+        _debug_print("--- Inside {func_name} ---"); _debug_print("Equation:", repr(_EQ_STRING)); _debug_print("Globals Keys:", eval_globals.keys()); _debug_print("Locals:", eval_locals)
 
-        # <<< DEBUGGING PRINTS >>>
-        _debug_print("--- Inside {func_name} ---")
-        _debug_print("Equation String:", repr(_EQ_STRING))
-        _debug_print("Eval Globals Keys:", eval_globals.keys())
-        _debug_print("Eval Locals:", eval_locals)
-        # <<< END DEBUGGING >>>
-
-        # 3. Call eval, wrapped in its own try/except
-        evaluated_value = np.nan # Default if eval fails
+        # 2. Call eval, store result or NaN on failure
         try:
-            evaluated_value = eval(_EQ_STRING, eval_globals, eval_locals)
-            _debug_print("Eval Raw Result:", repr(evaluated_value))
+            result = eval(_EQ_STRING, eval_globals, eval_locals)
+            _debug_print("Eval Raw Result:", repr(result))
         except Exception as e_eval:
-            # <<< CORRECTED DEBUG PRINT FOR EVAL ERROR >>>
-            _debug_print(f"!!! ERROR during eval itself: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            # evaluated_value remains np.nan
+            _debug_print(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
+            result = np.nan # Assign NaN if eval fails
 
-        # Assign to result *after* potential eval failure is handled
-        result = evaluated_value
-
-        # --- Result Validation and Conversion ---
+        # 3. Validate and Convert result (NOW 'result' is guaranteed to exist)
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
             result = result.astype(float)
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
-        else:
-             # This case now more likely means eval failed and result is still NaN
-             _debug_print(f"Result is not numeric after processing: {type(result)}, value: {repr(result)}")
-             # Return NaN rather than raising TypeError if eval failed
-             if np.isnan(result): # Check if it's the NaN from failed eval
-                 pass # Keep result as NaN
-             else: # Should not happen if eval succeeded, but safeguard
-                 raise TypeError(f"Equation did not produce a valid numeric result (got {{type(result)}})")
+        # Check if result is STILL not numeric (e.g., it started as NaN or was None/string)
+        elif not isinstance(result, (np.ndarray, float)): # Check if it's not array or float now
+             _debug_print(f"Result is not numeric type after processing: {type(result)}, value: {repr(result)}")
+             result = np.nan # Ensure non-numeric results become NaN
 
         # Final check for NaN/Inf before returning
-        if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
-        elif not np.isfinite(result): result = np.nan
+        if isinstance(result, np.ndarray):
+            # Check if ALL values are NaN - might indicate total failure
+            if np.all(np.isnan(result)):
+                _debug_print("Warning: Resulting array is all NaNs.")
+            result[~np.isfinite(result)] = np.nan # Ensure only finite numbers or NaN
+        elif not np.isfinite(result):
+             # Handle scalar NaN/Inf
+             result = np.nan
 
-        _debug_print("Returning:", repr(result))
-        _debug_print("--------------------------")
+        _debug_print("Returning:", repr(result)); _debug_print("--------------------------")
         return result
 
     except Exception as e_outer:
+        # Catch errors in surrounding logic (unlikely now but keep as safeguard)
         _debug_print(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
-        return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
+        # Attempt to return NaN array matching input x shape if possible
+        try:
+            return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
+        except: # Fallback if x is not available or invalid
+            return np.nan
+
 """
     # --- Debugging: Show generated code --- (Keep this)
     st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
 
     local_namespace = {}
-    try:
-        exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile:
-        raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
-
-    if func_name not in local_namespace:
-         raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
+    try: exec(func_code, exec_globals, local_namespace)
+    except Exception as e_compile: raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
+    if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
 
     created_func = local_namespace[func_name]
 
