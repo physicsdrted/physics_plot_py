@@ -20,9 +20,10 @@ SAFE_GLOBALS = {'__builtins__': {}}; SAFE_GLOBALS['np'] = np; SAFE_GLOBALS.updat
 
 # --- Helper Function Definitions ---
 # (validate_and_parse_equation, create_fit_function, numerical_derivative, safeguard_errors)
+# ... (Keep these functions exactly as defined in the previous complete code block) ...
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
-    eq_string = eq_string.strip()
+    eq_string = eq_string.strip();
     if not eq_string: raise ValueError("Equation cannot be empty.")
     eq_string = eq_string.replace('^', '**')
     if not re.match(ALLOWED_CHARS, eq_string):
@@ -51,13 +52,12 @@ def {func_name}(x, {param_str}):
         for p_name in _PARAMS: eval_locals[p_name] = local_args[p_name]
         result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
         if isinstance(result, (np.ndarray, list, tuple)):
-            result = np.asarray(result)
+            result = np.asarray(result);
             if np.iscomplexobj(result): result = np.real(result)
             result = result.astype(float)
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
         else: raise TypeError(f"Equation returned non-numeric type: {{type(result)}}")
-        # Let curve_fit handle NaNs from evaluation by default
         return result
     except ZeroDivisionError: return np.nan
     except Exception as e: return np.nan
@@ -85,6 +85,7 @@ def safeguard_errors(err_array, min_err=1e-12):
      if num_invalid > 0: st.warning(f"Found {num_invalid} invalid values in error array. Replacing with {min_err}."); safe_err[invalid_mask] = min_err
      return safe_err
 
+
 # --- Main App Logic ---
 st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
@@ -95,22 +96,25 @@ if 'data_loaded' not in st.session_state:
     st.session_state.x_err_safe = None; st.session_state.y_err_safe = None; st.session_state.x_axis_label = "X"
     st.session_state.y_axis_label = "Y"; st.session_state.fit_results = None; st.session_state.final_fig = None
     st.session_state.processed_file_key = None
+    st.session_state.df_head = None # <<< Initialize df_head
 
 # --- File Uploader ---
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
 
 if uploaded_file is not None:
     current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+
+    # Process file only if it's a new file
     if current_file_key != st.session_state.get('processed_file_key', None):
         st.info(f"Processing uploaded file: {uploaded_file.name}")
-        st.session_state.data_loaded = False; st.session_state.fit_results = None; st.session_state.final_fig = None
+        # Reset state for new file
+        st.session_state.data_loaded = False; st.session_state.fit_results = None
+        st.session_state.final_fig = None; st.session_state.df_head = None
 
         try:
-            # Read data - Specify dtype=str initially to prevent premature type inference issues
+            # Read data as string
             raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
-            st.write(f"Raw data read (shape): {raw_df.shape}") # Debug output
-            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
-                 st.error("Invalid file structure: Needs labels (row 1), 4 data cols, >=1 data row."); st.stop()
+            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4: st.error("Invalid file structure."); st.stop()
 
             # Extract Labels
             try: x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
@@ -118,83 +122,63 @@ if uploaded_file is not None:
 
             # Extract data rows
             df = raw_df.iloc[1:].copy()
-            if df.empty: st.error("No data rows found below the first row."); st.stop()
-            if df.shape[1] != 4: st.error(f"Expected 4 data columns, found {df.shape[1]}."); st.stop()
-
+            if df.empty or df.shape[1] != 4: st.error("No data rows or wrong cols."); st.stop()
             df.columns = ['x', 'x_err', 'y', 'y_err']
-            st.write(f"Data shape after header removal: {df.shape}") # Debug output
 
-            # Attempt numeric conversion column by column for better error messages
-            converted_cols = {}
-            conversion_failed = False
+            # Convert to numeric with detailed check
+            converted_cols = {}; conversion_failed = False
             for col in df.columns:
                 try:
-                    # Use errors='coerce' first to identify specific problematic values
                     numeric_col = pd.to_numeric(df[col], errors='coerce')
                     if numeric_col.isnull().any():
-                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2 # +2 for 0-based index and header row
-                        st.error(f"Column '{col}' contains non-numeric data or empty cells. First problematic value likely near original row {first_bad_index}.")
-                        conversion_failed = True
-                        break # Stop checking other columns
-                    else:
-                        # If coercion worked and no NaNs, convert for real
-                        converted_cols[col] = pd.to_numeric(df[col])
-                except Exception as e: # Catch potential errors during conversion itself
-                     st.error(f"Error converting column '{col}' to numeric: {e}")
-                     conversion_failed = True
-                     break
+                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2
+                        st.error(f"Col '{col}' has non-numeric/empty data near original row {first_bad_index}.")
+                        conversion_failed = True; break
+                    else: converted_cols[col] = pd.to_numeric(df[col]) # Store good conversion
+                except Exception as e: st.error(f"Error converting col '{col}': {e}"); conversion_failed = True; break
             if conversion_failed: st.stop()
 
-            # Reconstruct DataFrame with converted columns
-            df = pd.DataFrame(converted_cols)
-            st.write("Data successfully converted to numeric.") # Debug output
+            df = pd.DataFrame(converted_cols) # Rebuild with converted data
 
-            # --- <<< ADD Data Table Display Here >>> ---
-            st.markdown("---")
-            st.subheader("Loaded Data Preview (First 10 Rows)")
-            st.dataframe(df.head(10), use_container_width=True)
-            st.write(f"Full data shape: {df.shape}")
-            st.write(f"Data types:\n{df.dtypes}")
-            st.markdown("---")
-            # --- <<< End of Data Table Display >>> ---
-
-            # Store processed data in session state
+            # --- Store processed data and preview in session state ---
             st.session_state.x_data = df['x'].to_numpy(); st.session_state.y_data = df['y'].to_numpy()
             st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
             st.session_state.y_err_safe = safeguard_errors(df['y_err'].to_numpy())
             st.session_state.x_axis_label = x_label; st.session_state.y_axis_label = y_label
+            st.session_state.df_head = df.head(10) # <<< Store DataFrame head
             st.session_state.data_loaded = True; st.session_state.processed_file_key = current_file_key
             st.success("Data loaded and validated successfully!")
+            # --- REMOVED st.rerun() here ---
 
-            # --- Initial Plot Display (Check if data is valid) ---
-            if (st.session_state.x_data is not None and st.session_state.y_data is not None and
-                st.session_state.x_data.size > 0 and st.session_state.y_data.size > 0):
-                st.subheader("Initial Data Plot")
-                try:
-                    fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
-                    ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data,
-                                        yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe,
-                                        fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
-                    ax_initial.set_xlabel(st.session_state.x_axis_label); ax_initial.set_ylabel(st.session_state.y_axis_label)
-                    ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
-                    ax_initial.grid(True, linestyle=':', alpha=0.7); ax_initial.legend(); plt.tight_layout()
-                    st.pyplot(fig_initial)
-                except Exception as plot_err:
-                    st.error(f"Error generating initial plot: {plot_err}")
-            else:
-                st.warning("Could not generate initial plot because data arrays are invalid or empty after processing.")
+        except pd.errors.ParserError as pe: st.error(f"CSV Parsing Error: {pe}. Check format."); st.stop()
+        except Exception as e: st.error(f"Error processing file: {e}"); st.stop()
 
-            st.rerun() # Rerun to update UI state
-
-        except pd.errors.ParserError as pe:
-             st.error(f"Error parsing CSV file: {pe}. Check file format and encoding.")
-             st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-            st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-
-# --- Show Input Section or Results ---
+# --- Display Data Preview and Initial Plot if data loaded ---
 if st.session_state.data_loaded:
+
+    # --- Display Data Table Preview --- *MOVED HERE*
+    if st.session_state.df_head is not None:
+        st.markdown("---")
+        st.subheader("Loaded Data Preview (First 10 Rows)")
+        st.dataframe(st.session_state.df_head, use_container_width=True)
+        st.markdown("---")
+
+    # --- Display Initial Plot --- *MOVED HERE*
+    st.subheader("Initial Data Plot")
+    try:
+        fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
+        ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data,
+                            yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe,
+                            fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
+        ax_initial.set_xlabel(st.session_state.x_axis_label); ax_initial.set_ylabel(st.session_state.y_axis_label)
+        ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
+        ax_initial.grid(True, linestyle=':', alpha=0.7); ax_initial.legend(); plt.tight_layout()
+        st.pyplot(fig_initial)
+    except Exception as plot_err:
+        st.error(f"Error generating initial plot: {plot_err}")
+
+
+    # --- Show Fitting Controls OR Results ---
     if not st.session_state.get('fit_results', None):
         # --- Fitting Controls ---
         st.markdown("---"); st.subheader("Enter Fit Equation"); st.markdown("Use `x`, parameters (A-Z), functions (e.g., `sin`, `exp`, `log`, `np.cos`). Example: `A * exp(-B * x) + C`")
@@ -202,28 +186,28 @@ if st.session_state.data_loaded:
         fit_button = st.button("Perform Fit", key="fit_button")
 
         if fit_button and eq_string_input:
-            st.session_state.final_fig = None
+            st.session_state.final_fig = None # Clear previous final figure
             with st.spinner("Performing iterative fit... Please wait."):
                 try:
+                    # --- Get Equation, Create Function, Iterative Fit ---
                     processed_eq_string, params = validate_and_parse_equation(eq_string_input)
                     fit_func = create_fit_function(processed_eq_string, params)
                     x_data = st.session_state.x_data; y_data = st.session_state.y_data; x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
                     popt_current = None; pcov_current = None; total_err_current = y_err_safe; fit_successful = True
                     fit_progress_area = st.empty()
-                    for i in range(4):
+                    for i in range(4): # Fit loop
                         fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
                         p0 = popt_current if i > 0 else None
                         try:
                             popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=total_err_current, absolute_sigma=True, p0=p0, maxfev=5000 + i*2000) # Removed check_finite
                             if pcov_current is None or not np.all(np.isfinite(pcov_current)): st.warning(f"Fit {fit_num} cov matrix non-finite."); fit_successful = False; break
-                        except ValueError as fit_error: st.error(f"ValueError during fit {fit_num} (check data/function validity?): {fit_error}"); fit_successful = False; break
+                        except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
                         except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num}: {fit_error}"); fit_successful = False; break
                         except Exception as fit_error: st.error(f"Unexpected error during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        if i < 3:
+                        if i < 3: # Recalculate error if not last fit
                             slopes = numerical_derivative(fit_func, x_data, popt_current)
                             total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
                             total_err_current = safeguard_errors(np.sqrt(total_err_sq))
-
                     fit_progress_area.empty()
                     if not fit_successful: st.error("Fit failed during iterations."); st.stop()
 
@@ -237,7 +221,7 @@ if st.session_state.data_loaded:
                     st.success("Fit completed successfully!")
 
                     # --- Generate Final Plot Figure ---
-                    fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08) # Adjusted for 2 plot rows
+                    fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
                     ax0 = fig.add_subplot(gs[0]); ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
                     x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200); y_fit_curve = fit_func(x_fit_curve, *popt_final)
                     ax0.plot(x_fit_curve, y_fit_curve, '-', label='Fit Line (Final Iteration)', zorder=10, linewidth=1.5); ax0.set_ylabel(st.session_state.y_axis_label); plot_title = f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with Final Fit"; ax0.set_title(plot_title); ax0.legend(loc='best'); ax0.grid(True, linestyle=':', alpha=0.6); ax0.tick_params(axis='x', labelbottom=False)
@@ -245,17 +229,15 @@ if st.session_state.data_loaded:
                     ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
                     ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
                     fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
-                    st.rerun() # Rerun to display results
+                    st.rerun() # <<< Rerun HERE to display results after fit is done >>>
 
-                # --- Error Handling for outer try block ---
                 except ValueError as e: st.error(f"Input Error: {e}")
                 except SyntaxError as e: st.error(f"Syntax Error: {e}")
                 except RuntimeError as e: st.error(f"Fit Error during setup: {e}")
                 except TypeError as e: st.error(f"Eval Error: {e}")
                 except Exception as e: st.error(f"An unexpected error occurred: {e} ({type(e).__name__})")
 
-    else: # If data is loaded AND results exist, display them
-        # --- Display Results Section --- (Same as before)
+    else: # If data is loaded AND results exist, display results
         st.markdown("---"); st.subheader("Fit Results")
         if st.session_state.final_fig: st.pyplot(st.session_state.final_fig)
         res = st.session_state.fit_results; table_rows = []
