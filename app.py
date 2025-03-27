@@ -285,12 +285,13 @@ if fit_button and eq_string_input:
                     st.rerun() # Rerun ONLY after successful completion to display results
 
                 # --- Outer error handling block ---
-            except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
-            except SyntaxError as e_setup: st.error(f"Syntax Error: {e_setup}")
-            except Exception as e_setup:
-                st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})")
-                import traceback
-                st.error(traceback.format_exc())
+        except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
+        except SyntaxError as e_setup: st.error(f"Syntax Error: {e_setup}")
+        except Exception as e_setup:
+            st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})")
+            import traceback
+            st.error(traceback.format_exc())
+
 
     else: # If data is loaded AND results exist, display them
         # --- Display Results Section ---
