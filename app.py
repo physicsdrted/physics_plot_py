@@ -49,36 +49,46 @@ def validate_and_parse_equation(eq_string):
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
-    eval_locals_assignments = [f"'{p}': {p}" for p in params]; eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
+    # Construct the assignments for the locals dictionary used by eval
+    eval_locals_assignments = [f"'{p}': {p}" for p in params]
+    eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
+
+    # Capture necessary variables in the global scope for exec
+    exec_globals = {'np': np, 'SAFE_GLOBALS': SAFE_GLOBALS, 'eq_string': eq_string, 'params': params}
+
+    # Code for the function to be created by exec
     func_code = f"""
 import numpy as np
-# Need access to SAFE_GLOBALS within the generated function's scope
+# Need access to SAFE_GLOBALS from the exec_globals dict
 _SAFE_GLOBALS = SAFE_GLOBALS
-_EQ_STRING = eq_string # Capture eq_string too
+_EQ_STRING = eq_string # Capture eq_string
+_PARAMS = params # Capture params list
 
 def {func_name}(x, {param_str}):
     try:
+        # Construct eval locals mapping param names to their current values
         eval_locals = {{'x': x}}
-        for i, p_name in enumerate({params!r}): # Use repr to embed param list safely
-             eval_locals[p_name] = locals()[p_name] # Map param names to passed arguments
+        # Directly use the arguments passed (A, B, C...) by curve_fit
+        local_args = locals()
+        for p_name in _PARAMS:
+            eval_locals[p_name] = local_args[p_name]
 
         # Use captured _SAFE_GLOBALS and _EQ_STRING
         result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
 
         if isinstance(result, (np.ndarray, list, tuple)):
-            result = np.asarray(result);
+            result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result) # Simplified warning
-            result = result.astype(float);
-            if np.any(np.isnan(result)) or np.any(np.isinf(result)): pass # curve_fit handles NaNs
+            result = result.astype(float)
+            if np.any(np.isnan(result)) or np.any(np.isinf(result)): pass
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
         else: raise TypeError(f"Equation returned non-numeric type: {{type(result)}}")
         return result
-    # Error handling within the function called by curve_fit
     except ZeroDivisionError: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
     except Exception as e: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
 """
-    exec_globals = {'np': np, 'SAFE_GLOBALS': SAFE_GLOBALS, 'eq_string': eq_string}; local_namespace = {}
+    local_namespace = {}
     try: exec(func_code, exec_globals, local_namespace)
     except Exception as e: raise SyntaxError(f"Failed to compile function: {e} ({type(e).__name__})") from e
     if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
@@ -88,7 +98,6 @@ def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
     try:
         if params is None or not all(np.isfinite(p) for p in params):
-             # Use st.warning in Streamlit context
              st.warning("Invalid parameters passed to numerical_derivative. Returning slope=0.")
              return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
         y_plus_h = func(x + h, *params); y_minus_h = func(x - h, *params)
@@ -100,7 +109,6 @@ def numerical_derivative(func, x, params, h=1e-7):
         st.warning(f"Error during num derivative: {e}. Returning slope=0.")
         return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
 
-# <<< Definition for safeguard_errors >>>
 def safeguard_errors(err_array, min_err=1e-12):
      """Replaces non-positive or NaN/Inf errors with a small positive number."""
      safe_err = np.array(err_array, dtype=float) # Ensure float copy
@@ -126,17 +134,17 @@ if 'data_loaded' not in st.session_state:
     st.session_state.y_axis_label = "Y"
     st.session_state.fit_results = None
     st.session_state.final_fig = None
+    st.session_state.processed_file_key = None # Use key based on name/size
 
 # --- File Uploader ---
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
 
-# Use a flag in session state to track if the current file has been processed
-if 'processed_file_id' not in st.session_state:
-    st.session_state.processed_file_id = None
-
 if uploaded_file is not None:
-    # Process file only if it's a new file
-    if uploaded_file.id != st.session_state.get('processed_file_id', None):
+    # <<< Create a unique key based on file name and size >>>
+    current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+
+    # Process file only if it's a new file (different key)
+    if current_file_key != st.session_state.get('processed_file_key', None):
         st.info(f"Processing uploaded file: {uploaded_file.name}")
         # Reset flags and data before processing new file
         st.session_state.data_loaded = False
@@ -149,7 +157,7 @@ if uploaded_file is not None:
             if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
                 st.error("Invalid file structure: Needs labels (row 1), 4 data cols, >=1 data row.")
                 st.stop()
-            # Extract Labels
+            # Extract Labels safely
             try: x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
             except Exception: x_label = "X (Col 1)"; y_label = "Y (Col 3)"; st.warning("Could not read labels.")
             # Extract/validate data
@@ -165,19 +173,19 @@ if uploaded_file is not None:
             # Store processed data in session state
             st.session_state.x_data = df['x'].to_numpy()
             st.session_state.y_data = df['y'].to_numpy()
-            st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy())) # Call defined function
-            st.session_state.y_err_safe = safeguard_errors(df['y_err'].to_numpy())       # Call defined function
+            st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
+            st.session_state.y_err_safe = safeguard_errors(df['y_err'].to_numpy())
             st.session_state.x_axis_label = x_label
             st.session_state.y_axis_label = y_label
             st.session_state.data_loaded = True
-            st.session_state.processed_file_id = uploaded_file.id # Mark this file as processed
+            st.session_state.processed_file_key = current_file_key # Mark file as processed
             st.success("Data loaded and validated successfully!")
             st.rerun() # Rerun to update UI state immediately after load
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
             st.session_state.data_loaded = False
-            st.session_state.processed_file_id = None # Clear processed ID on error
+            st.session_state.processed_file_key = None # Clear processed key on error
             st.stop()
 
 # --- Show Input Section only if data is loaded ---
@@ -242,8 +250,8 @@ if st.session_state.data_loaded:
                 }
                 st.success("Fit completed successfully!")
 
-                # --- Generate Plot Figure --- (Same plotting logic)
-                fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(3, 1, height_ratios=[6, 2, 0.1], hspace=0.08)
+                # --- Generate Plot Figure ---
+                fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(3, 1, height_ratios=[6, 2, 0.1], hspace=0.08) # Minimal height for row 3
                 ax0 = fig.add_subplot(gs[0]); ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
                 x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200); y_fit_curve = fit_func(x_fit_curve, *popt_final)
                 ax0.plot(x_fit_curve, y_fit_curve, '-', label='Fit Line (Final Iteration)', zorder=10, linewidth=1.5); ax0.set_ylabel(st.session_state.y_axis_label)
@@ -251,7 +259,7 @@ if st.session_state.data_loaded:
                 ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
                 ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
                 ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
-                st.session_state.final_fig = fig # Store figure in session state
+                st.session_state.final_fig = fig # Store figure
 
             except ValueError as e: st.error(f"Input Error: {e}")
             except SyntaxError as e: st.error(f"Syntax Error: {e}")
@@ -259,8 +267,9 @@ if st.session_state.data_loaded:
             except TypeError as e: st.error(f"Eval Error: {e}")
             except Exception as e: st.error(f"An unexpected error occurred: {e} ({type(e).__name__})")
 
+
 # --- Display Results Section ---
-if st.session_state.get('fit_results', None): # Check if results exist
+if st.session_state.get('fit_results', None):
     st.markdown("---")
     st.subheader("Fit Results")
 
@@ -268,7 +277,7 @@ if st.session_state.get('fit_results', None): # Check if results exist
     if st.session_state.final_fig:
         st.pyplot(st.session_state.final_fig)
 
-    # Prepare and Display Results Table Data
+    # Prepare and Display Results Table Data using st.dataframe
     res = st.session_state.fit_results; table_rows = []
     table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""})
     for i, p_name in enumerate(res['params']): table_rows.append({"Category": f"Parameter: {p_name}", "Value": f"{res['popt'][i]:.5g}", "Uncertainty": f"{res['perr'][i]:.3g}"})
@@ -276,15 +285,16 @@ if st.session_state.get('fit_results', None): # Check if results exist
     table_rows.append({"Category": "Degrees of Freedom (DoF)", "Value": f"{res['dof']}", "Uncertainty": ""})
     table_rows.append({"Category": "Reduced χ²/DoF", "Value": f"{res['red_chi2']:.4f}" if res['dof'] > 0 else "N/A", "Uncertainty": f"{res['red_chi2_err']:.3f}" if res['dof'] > 0 else ""})
     results_df = pd.DataFrame(table_rows)
-    st.dataframe(results_df.set_index('Category'), use_container_width=True) # Use container width
+    st.dataframe(results_df.set_index('Category'), use_container_width=True) # Display as a Streamlit DataFrame
 
     # SVG Download Button
     if st.session_state.final_fig:
         fn = f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit.svg"
         fn = re.sub(r'[^\w\.\-]+', '_', fn).strip('_').lower() or "fit_plot.svg"
         img_buffer = io.BytesIO()
-        # Note: bbox_inches='tight' might be less necessary when table is separate dataframe
-        st.session_state.final_fig.savefig(img_buffer, format='svg') # Removed bbox_inches for simplicity with st.dataframe
+        # Since table is now separate (st.dataframe), bbox_inches might not be needed,
+        # but doesn't hurt if future elements outside axes are added.
+        st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
         img_buffer.seek(0)
         st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml")
 
