@@ -35,38 +35,67 @@ def validate_and_parse_equation(eq_string):
     return eq_string, params
 
 def create_fit_function(eq_string, params):
-    """Dynamically creates Python function from validated equation string."""
-    # (Code remains largely the same - ensure float output)
-    func_name = "dynamic_fit_func"; param_str = ', '.join(params)
-    exec_globals = {'np': np, 'SAFE_GLOBALS': SAFE_GLOBALS, 'eq_string': eq_string, 'params': params}
+    """Dynamically creates Python function from validated equation string.
+       Revised local dictionary construction for eval."""
+    func_name = "dynamic_fit_func"
+    param_str = ', '.join(params)
+
+    # Construct the assignments for the locals dictionary string more explicitly
+    # Creates strings like "'A': A", "'B': B" etc. using the function arguments
+    eval_locals_assignments = [f"'{p}': {p}" for p in params]
+    # Joins them into the dictionary string: "{'x': x, 'A': A, 'B': B}"
+    eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}" # <<< This seems correct
+
+    # Variables needed in the global scope where exec runs
+    exec_globals = {'np': np, 'SAFE_GLOBALS': SAFE_GLOBALS, 'eq_string': eq_string}
+
+    # Code for the function to be created by exec
     func_code = f"""
 import numpy as np
-_SAFE_GLOBALS = SAFE_GLOBALS; _EQ_STRING = eq_string; _PARAMS = params
+# SAFE_GLOBALS and eq_string are captured from exec_globals
+_SAFE_GLOBALS = SAFE_GLOBALS
+_EQ_STRING = eq_string
+
 def {func_name}(x, {param_str}):
+    # This function is called by curve_fit. x and params (A, B...) are args.
     try:
-        eval_locals = {{'x': x}}; local_args = locals()
-        for p_name in _PARAMS: eval_locals[p_name] = local_args[p_name]
+        # Build the dictionary for eval using the function arguments DIRECTLY
+        eval_locals = {eval_locals_str} # <<< Use the pre-constructed string representation
+
+        # Evaluate the user's equation string
         result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
-        # Ensure result is always float or array of floats for curve_fit
+
+        # --- Result Validation and Conversion --- (Same as before)
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
-            result = result.astype(float) # Force float
+            result = result.astype(float)
         elif isinstance(result, complex): result = float(result.real)
-        elif isinstance(result, (int, float)): result = float(result) # Force float
+        elif isinstance(result, (int, float)): result = float(result)
         else: raise TypeError(f"Equation returned non-numeric type: {{type(result)}}")
+
         # Replace any NaNs/Infs from calculation with np.nan before returning
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
         return result
-    except Exception as e: return np.nan # Return NaN on any error during eval
-"""
-    local_namespace = {};
-    try: exec(func_code, exec_globals, local_namespace)
-    except Exception as e: raise SyntaxError(f"Failed to compile function: {e} ({type(e).__name__})") from e
-    if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
-    return local_namespace[func_name]
+    except Exception as e:
+        # Return NaN on *any* error during evaluation within this function
+        # print(f"DEBUG: Error in fit_func eval: {e}") # Optional debug
+        return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
 
+"""
+    local_namespace = {}
+    try:
+        # Execute the code string. Defines func_name in local_namespace
+        exec(func_code, exec_globals, local_namespace)
+    except Exception as e:
+        # Catch errors during the *compilation/definition* of the function
+        raise SyntaxError(f"Failed to compile generated function: {e} ({type(e).__name__})") from e
+
+    if func_name not in local_namespace:
+         raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
+
+    return local_namespace[func_name]
 
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
