@@ -37,21 +37,41 @@ def validate_and_parse_equation(eq_string):
 # <<< MODIFIED create_fit_function >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Includes debugging output for generated code and a test call."""
+       Simplified eval environment construction."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
-    eval_locals_assignments = [f"'{p}': {p}" for p in params]
-    eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
-    exec_globals = {'np': np, 'SAFE_GLOBALS': SAFE_GLOBALS, 'eq_string': eq_string, 'params': params}
+    # We still need the list of parameter names for the function signature
+    # And the equation string itself
+    exec_globals = {'np': np, 'ALLOWED_NP_FUNCTIONS': ALLOWED_NP_FUNCTIONS, 'eq_string': eq_string, 'params': params}
 
+    # Code for the function to be created by exec
     func_code = f"""
 import numpy as np
-_SAFE_GLOBALS = SAFE_GLOBALS; _EQ_STRING = eq_string; _PARAMS = params
+# Allowed functions are captured via exec_globals
+_ALLOWED_NP_FUNCTIONS = ALLOWED_NP_FUNCTIONS
+_EQ_STRING = eq_string
+_PARAMS = params
+
 def {func_name}(x, {param_str}):
     try:
-        eval_locals = {eval_locals_str}
-        result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
+        # 1. Build the dictionary containing current LOCAL values (x, A, B...)
+        eval_locals = {{'x': x}}
+        local_args = locals()
+        for p_name in _PARAMS:
+            eval_locals[p_name] = local_args[p_name]
+
+        # 2. Build the GLOBALS dictionary needed by eval *inside* the function call
+        #    It needs 'np' and the specific allowed functions.
+        eval_globals = {{'np': np}}
+        eval_globals.update(_ALLOWED_NP_FUNCTIONS)
+        # Restrict builtins within eval's globals
+        eval_globals['__builtins__'] = {{}}
+
+        # 3. Call eval with the specific globals and locals for this execution
+        result = eval(_EQ_STRING, eval_globals, eval_locals) # <<< Use constructed eval_globals
+
+        # --- Result Validation and Conversion --- (Same as before)
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
@@ -59,20 +79,16 @@ def {func_name}(x, {param_str}):
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
         else: raise TypeError(f"Equation returned non-numeric type: {{type(result)}}")
+
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
         return result
     except Exception as e_inner:
-        # Return NaN on *any* error during evaluation
-        # Can add specific error type check if needed later
+        # print(f"DEBUG: Error during eval: {{e_inner}}") # Use this format if uncommenting
         return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
 """
-    # --- Debugging: Show generated code ---
-    st.markdown("---")
-    st.subheader("Debug: Generated Fit Function Code")
-    st.code(func_code, language='python')
-    st.markdown("---")
-    # --- End Debugging ---
+    # --- Debugging: Show generated code --- (Keep this)
+    st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
 
     local_namespace = {}
     try:
@@ -85,26 +101,15 @@ def {func_name}(x, {param_str}):
 
     created_func = local_namespace[func_name]
 
-    # --- Debugging: Test call to the created function ---
+    # --- Debugging: Test call --- (Keep this)
     try:
-        st.write("Debug: Testing created function call...")
-        test_x = np.array([1.0, 2.0, 3.0])
-        # Use 1.0 for all parameters in the test call
-        test_params = [1.0] * len(params)
+        st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]); test_params = [1.0] * len(params)
         test_result = created_func(test_x, *test_params)
         st.write(f"  Test call with x={test_x}, params={test_params} -> result={test_result}")
-        if isinstance(test_result, np.ndarray):
-            st.write(f"  Test result shape: {test_result.shape}, dtype: {test_result.dtype}")
-            if np.any(~np.isfinite(test_result)):
-                st.warning("  Test call resulted in non-finite values (NaN/Inf).")
-        elif not np.isfinite(test_result):
-             st.warning("  Test call resulted in non-finite scalar value (NaN/Inf).")
-
+        if isinstance(test_result, np.ndarray): st.write(f"  Test result shape: {test_result.shape}, dtype: {test_result.dtype}");
+        if np.any(~np.isfinite(test_result)): st.warning("  Test call resulted in non-finite values (NaN/Inf).")
     except Exception as e_test:
-        st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})")
-        # Decide if this is fatal - maybe raise the error again?
-        raise RuntimeError("Test call failed, cannot proceed with fit.") from e_test
-    # --- End Debugging Test Call ---
+        st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})"); raise RuntimeError("Test call failed.") from e_test
 
     return created_func
 # <<< END MODIFIED create_fit_function >>>
