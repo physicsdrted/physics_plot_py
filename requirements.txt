@@ -1,0 +1,10 @@
+streamlit
+pandas
+matplotlib
+sys
+os
+numpy
+re
+inspect
+io
+scipy
