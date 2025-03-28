@@ -43,26 +43,40 @@ def validate_and_parse_equation(eq_string):
     if not params: raise ValueError("No fit parameters (A-Z) found.")
     return eq_string, params
 
+# <<< MODIFIED create_fit_function (Temporary Parameter Rename Test) >>>
 def create_fit_function(eq_string, params):
-    """Dynamically creates Python function from validated equation string.
-       Uses default arguments for globals, accesses local parameters directly for eval."""
+    """Dynamically creates Python function. TEMPORARY TEST: Rename param A to P1."""
     func_name = "dynamic_fit_func"
-    param_str = ', '.join(params)
+
+    # <<< TEMPORARY RENAME TEST LOGIC >>>
+    original_params = list(params) # Keep original list
+    internal_params_list = list(params) # List for function signature
+    temp_eq_string = eq_string
+    rename_map = {} # To potentially map back if needed, though not used currently
+    param_to_rename = 'A' # Parameter causing potential issue
+    internal_name = 'P1'  # Temporary internal name
+
+    if param_to_rename in params:
+        st.warning(f"TEMP TEST: Renaming parameter '{param_to_rename}' internally to '{internal_name}' for fitting.")
+        internal_params_list = [internal_name if p == param_to_rename else p for p in params]
+        # Use regex for whole word replacement to avoid replacing 'A' in 'np.Abs' etc.
+        temp_eq_string = re.sub(r'\b' + re.escape(param_to_rename) + r'\b', internal_name, temp_eq_string)
+        rename_map[param_to_rename] = internal_name
+        st.write(f"  Temp Equation: `{temp_eq_string}`") # Show modified equation
+    # <<< END TEMPORARY RENAME TEST LOGIC >>>
+
+    param_str = ', '.join(internal_params_list) # Use internal names in signature
+
 
     # Define debug print function in the outer scope
-    def _actual_debug_print(*args, **kwargs):
-        import sys
-        print("DEBUG:", *args, file=sys.stderr, **kwargs)
+    def _actual_debug_print(*args, **kwargs): import sys; print("DEBUG:", *args, file=sys.stderr, **kwargs)
 
-    # <<< CORRECTED exec_globals definition >>>
-    # Globals needed when the function *definition* runs (via exec)
-    # These provide the default values for the function's arguments.
+    # Globals for exec default args
     exec_globals = {
         'np': np,
-        '_EQ_STRING_DEFAULT': eq_string,
         '_ALLOWED_NP_FUNCTIONS_DEFAULT': ALLOWED_NP_FUNCTIONS,
+        '_EQ_STRING_DEFAULT': temp_eq_string, # Use potentially modified string
         '_DEBUG_FUNC_DEFAULT': _actual_debug_print
-        # We no longer need _PARAMS_LIST here
     }
 
     # Define the function signature with defaults for globals only
@@ -71,101 +85,69 @@ import numpy as np
 import sys
 
 # Capture external values via default arguments
-def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
+def {func_name}(x, {param_str}, # Uses internal names like P1
                  _eq_str=_EQ_STRING_DEFAULT,
                  _allowed_funcs=_ALLOWED_NP_FUNCTIONS_DEFAULT,
                  _debug_func=_DEBUG_FUNC_DEFAULT):
     result = np.nan
     try:
-        # 1. Build eval_globals: Only np and allowed functions
-        eval_globals = {{'np': np}}
-        eval_globals.update(_allowed_funcs) # Use default arg
-        eval_globals['__builtins__'] = {{}}
-
-        # 2. Build eval_locals: Use locals() DIRECTLY from this scope
-        #    It automatically contains x, A, B... passed as arguments
+        # Build eval_globals
+        eval_globals = {{'np': np}}; eval_globals.update(_allowed_funcs); eval_globals['__builtins__'] = {{}}
+        # Build eval_locals using locals()
         eval_locals = locals()
-
-        # Debug prints (using default arg _debug_func)
+        # Debug prints
         _debug_func("--- Inside {func_name} ---")
         _debug_func("Equation:", repr(_eq_str))
         _debug_func("Globals Keys:", eval_globals.keys())
-        # Be careful printing full locals() if default args are complex objects
-        _debug_func("Locals Keys available to eval:", [k for k in eval_locals.keys() if not k.startswith('_')]) # Show only x, A, B... keys
+        _debug_func("Locals Keys available:", [k for k in eval_locals.keys() if not k.startswith('_')]) # Show only x, P1...
 
-        # 3. Call eval
+        # Call eval
         try:
-            # Pass locals() directly - contains x, A, B... etc.
-            result = eval(_eq_str, eval_globals, eval_locals)
+            result = eval(_eq_str, eval_globals, eval_locals) # Uses internal names like P1
             _debug_func("Eval Raw Result:", repr(result))
-        except Exception as e_eval:
-            _debug_func(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            # result remains np.nan
+        except Exception as e_eval: _debug_func(f"!!! ERROR during eval: {{repr(e_eval)}}")
 
-        # 4. Validate and Convert result
-        # ... (validation logic remains the same) ...
-        if isinstance(result, (np.ndarray, list, tuple)):
-            result = np.asarray(result)
-            if np.iscomplexobj(result): result = np.real(result)
-            result = result.astype(float)
+        # Validate/Convert (same logic)
+        if isinstance(result, (np.ndarray, list, tuple)): result = np.asarray(result);
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
-        elif not isinstance(result, (np.ndarray, float)):
-             _debug_func("Result type not ndarray/float after checks. Val:", repr(result))
-             result = np.nan
+        elif not isinstance(result, (np.ndarray, float)): _debug_func("Result type not num:", repr(result)); result = np.nan
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
-
         _debug_func("Returning:", repr(result)); _debug_func("--------------------------")
         return result
-
-    except Exception as e_outer:
-        _debug_func(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
-        try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
-        except: return np.nan
+    except Exception as e_outer: _debug_func(f"!!! ERROR outer: {{repr(e_outer)}}");
+    try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
+    except: return np.nan
 """
-    # --- Debugging: Show generated code ---
-    st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
+    st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---") # Show generated code
 
     local_namespace = {}
-    try:
-        # Execute using the corrected exec_globals
-        exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile:
-        raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
-
-    if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
+    try: exec(func_code, exec_globals, local_namespace)
+    except Exception as e_compile: raise SyntaxError(f"Compile failed: {e_compile}") from e_compile
+    if func_name not in local_namespace: raise RuntimeError(f"Func creation failed.")
     created_func = local_namespace[func_name]
 
-    # --- Debugging: Test call ---
+    # Test call uses original parameter count but function expects internal names
     try:
         st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]);
-        # Get number of params needed from the original list
-        test_params = [1.0] * len(params)
-        test_result = created_func(test_x, *test_params)
+        # Use the ORIGINAL number of parameters found (e.g., 1 for 'A*sqrt(x)')
+        test_params_values = [1.0] * len(params)
+        test_result = created_func(test_x, *test_params_values) # Call using values
         st.write(f"  Test call completed. Check terminal/log for 'DEBUG:' output.")
         st.write(f"  Test call returned: {test_result}")
         if isinstance(test_result, np.ndarray): st.write(f"  Test result shape: {test_result.shape}, dtype: {test_result.dtype}");
         if np.any(~np.isfinite(test_result)): st.warning("  Test call resulted in non-finite values (NaN/Inf).")
-    except Exception as e_test:
-        st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})"); raise RuntimeError("Test call failed.") from e_test
+    except Exception as e_test: st.error(f"Error during test call: {e_test}"); raise RuntimeError("Test call failed.") from e_test
 
-    return created_func
+    # Return the function, use original_params list later for display
+    return created_func, original_params
 
-# --- Main App Logic ---
-# ... (Rest of app.py remains the same as previous version with the corrected create_fit_function) ...
-# --- Include: ---
-# st.title(...)
-# st.write(...)
-# Session State Init
-# File Uploader
-# File processing logic (if uploaded_file...)
-# Display Data Preview and Initial Plot (if data_loaded...)
-# Fitting Controls OR Results display section (if/else based on fit_results...)
-    # Fitting Button Logic (calls create_fit_function, iterative curve_fit, etc.)
-# Footer
+# <<< END MODIFIED create_fit_function >>>
+
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
+    # (Code remains the same)
     try:
         if params is None or not all(np.isfinite(p) for p in params): st.warning("Invalid params to num_deriv."); return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
         y_plus_h = func(x + h, *params); y_minus_h = func(x - h, *params); deriv = (y_plus_h - y_minus_h) / (2 * h)
@@ -174,8 +156,9 @@ def numerical_derivative(func, x, params, h=1e-7):
         return deriv
     except Exception as e: st.warning(f"Error during num derivative: {e}. Return slope=0."); return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
 
-def safeguard_errors(err_array, min_err=1e-9): # Increased min_err
+def safeguard_errors(err_array, min_err=1e-9):
      """Replaces non-positive or NaN/Inf errors with a small positive number."""
+     # (Code remains the same)
      safe_err = np.array(err_array, dtype=float); invalid_mask = ~np.isfinite(safe_err) | (safe_err <= 0)
      num_invalid = np.sum(invalid_mask)
      if num_invalid > 0: st.warning(f"Found {num_invalid} invalid values in error array. Replacing with {min_err}."); safe_err[invalid_mask] = min_err
@@ -185,29 +168,25 @@ def safeguard_errors(err_array, min_err=1e-9): # Increased min_err
 st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
-# --- Session State Initialization ---
+# --- Session State Initialization --- (Same as before)
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False; st.session_state.x_data = None; st.session_state.y_data = None; st.session_state.x_err_safe = None; st.session_state.y_err_safe = None; st.session_state.x_axis_label = "X"; st.session_state.y_axis_label = "Y"; st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.processed_file_key = None; st.session_state.df_head = None
 
-# --- File Uploader ---
+# --- File Uploader --- (Same as before)
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
-
 if uploaded_file is not None:
     current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
     if current_file_key != st.session_state.get('processed_file_key', None):
         st.info(f"Processing uploaded file: {uploaded_file.name}")
         st.session_state.data_loaded = False; st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.df_head = None
         try:
-            # Read data as string
             raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
             if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4: st.error("Invalid file structure."); st.stop()
             try: x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
             except Exception: x_label = "X (Col 1)"; y_label = "Y (Col 3)"; st.warning("Could not read labels.")
             df = raw_df.iloc[1:].copy()
             if df.empty or df.shape[1] != 4: st.error("No data rows or wrong cols."); st.stop()
-            df.columns = ['x', 'x_err', 'y', 'y_err']
-            # Convert to numeric carefully
-            converted_cols = {}; conversion_failed = False
+            df.columns = ['x', 'x_err', 'y', 'y_err']; converted_cols = {}; conversion_failed = False
             for col in df.columns:
                 try:
                     numeric_col = pd.to_numeric(df[col], errors='coerce')
@@ -216,8 +195,6 @@ if uploaded_file is not None:
                 except Exception as e: st.error(f"Error converting col '{col}': {e}"); conversion_failed = True; break
             if conversion_failed: st.stop()
             df = pd.DataFrame(converted_cols)
-
-            # --- Store processed data and preview ---
             st.session_state.x_data = df['x'].to_numpy(); st.session_state.y_data = df['y'].to_numpy()
             st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
             st.session_state.y_err_safe = safeguard_errors(df['y_err'].to_numpy())
@@ -225,17 +202,13 @@ if uploaded_file is not None:
             st.session_state.df_head = df.head(10)
             st.session_state.data_loaded = True; st.session_state.processed_file_key = current_file_key
             st.success("Data loaded and validated successfully!")
-            # No explicit rerun needed here
-
+            # No rerun needed here
         except pd.errors.ParserError as pe: st.error(f"CSV Parsing Error: {pe}. Check format."); st.stop()
         except Exception as e: st.error(f"Error processing file: {e}"); st.stop()
 
-# --- Display Data Preview and Initial Plot if data loaded ---
+# --- Display Data Preview and Initial Plot if data loaded --- (Same as before)
 if st.session_state.data_loaded:
-    if st.session_state.df_head is not None:
-        st.markdown("---"); st.subheader("Loaded Data Preview (First 10 Rows)")
-        st.dataframe(st.session_state.df_head, use_container_width=True)
-        st.markdown("---")
+    if st.session_state.df_head is not None: st.markdown("---"); st.subheader("Loaded Data Preview (First 10 Rows)"); st.dataframe(st.session_state.df_head, use_container_width=True); st.markdown("---")
     st.subheader("Initial Data Plot");
     try:
         fig_initial, ax_initial = plt.subplots(figsize=(10, 6)); ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
@@ -255,13 +228,12 @@ if st.session_state.data_loaded:
                 # --- Outer try block for setup and loop ---
                 try:
                     processed_eq_string, params = validate_and_parse_equation(eq_string_input)
-                    # --- Function Creation ---
                     st.write("Attempting to create fit function...")
                     try:
-                        fit_func = create_fit_function(processed_eq_string, params)
+                        # <<< Capture original_params list from return value >>>
+                        fit_func, original_params = create_fit_function(processed_eq_string, params)
                         st.success("Fit function created successfully.")
-                    except (SyntaxError, RuntimeError, Exception) as create_err:
-                         st.error(f"Failed during function creation: {create_err}"); import traceback; st.error(traceback.format_exc()); st.stop()
+                    except (SyntaxError, RuntimeError, Exception) as create_err: st.error(f"Failed during function creation/test: {create_err}"); import traceback; st.error(traceback.format_exc()); st.stop()
 
                     x_data = st.session_state.x_data; y_data = st.session_state.y_data; x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
                     popt_current = None; pcov_current = None; total_err_current = y_err_safe; fit_successful = True
@@ -270,61 +242,34 @@ if st.session_state.data_loaded:
                     # --- Iterative Fitting Loop ---
                     for i in range(4):
                         fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
-                        p0 = popt_current if i > 0 else None
-                        sigma_to_use = total_err_current.copy() # Always use a copy
-
-                        # Debug Print
-                        with st.expander(f"Debug Info for Fit {fit_num}", expanded=False):
-                            st.write(f"**Inputs:**"); st.write(f"  x_data[:5]: `{x_data[:5]}`"); st.write(f"  y_data[:5]: `{y_data[:5]}`")
-                            st.write(f"  sigma[:5]: `{sigma_to_use[:5]}`"); st.write(f"  sigma min/max: `{np.min(sigma_to_use):.3g}, {np.max(sigma_to_use):.3g}`"); st.write(f"  p0: `{p0}`")
-
-                        # --- Inner try for curve_fit call ---
+                        p0 = popt_current if i > 0 else None; sigma_to_use = total_err_current.copy()
+                        with st.expander(f"Debug Info for Fit {fit_num}", expanded=False): st.write(f"**Inputs:**"); st.write(f"  sigma[:5]: `{sigma_to_use[:5]}`"); st.write(f"  p0: `{p0}`") # Simplified debug
                         try:
                             # Conditional curve_fit call (simplified for fit 1)
-                            if i == 0:
-                                 st.write(f"Fit {fit_num}: Using simplified curve_fit (no bounds/absolute_sigma)")
-                                 popt_current, pcov_current = curve_fit(
-                                     fit_func, x_data, y_data,
-                                     sigma=sigma_to_use, p0=p0, maxfev=5000 + i*2000
-                                 )
-                            else:
-                                 st.write(f"Fit {fit_num}: Using curve_fit with bounds and absolute_sigma")
-                                 popt_current, pcov_current = curve_fit(
-                                     fit_func, x_data, y_data,
-                                     sigma=sigma_to_use, absolute_sigma=True, p0=p0, maxfev=5000 + i*2000, bounds=(-np.inf, np.inf)
-                                 )
-
-                            # Check covariance after successful fit
-                            if pcov_current is None or not np.all(np.isfinite(pcov_current)):
-                                st.warning(f"Fit {fit_num} succeeded (popt={popt_current}) but cov matrix non-finite. Stopping iteration.")
-                                fit_successful = False; break
-
-                        # Catch errors from curve_fit
-                        except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        except TypeError as fit_error: st.error(f"TypeError during fit {fit_num}: {fit_error}"); import traceback; st.error(traceback.format_exc()); fit_successful = False; break
-                        except Exception as fit_error: st.error(f"Unexpected error DURING curve_fit {fit_num}: {fit_error} ({type(fit_error).__name__})"); fit_successful = False; break
-                        # --- End Inner try ---
-
-                        # Recalculate error if not last fit AND previous fit was successful
+                            if i == 0: popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=sigma_to_use, p0=p0, maxfev=5000 + i*2000)
+                            else: popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=sigma_to_use, absolute_sigma=True, p0=p0, maxfev=5000 + i*2000, bounds=(-np.inf, np.inf))
+                            if pcov_current is None or not np.all(np.isfinite(pcov_current)): st.warning(f"Fit {fit_num} cov matrix non-finite."); fit_successful = False; break
+                        except ValueError as fit_error: st.error(f"ValueError fit {fit_num}: {fit_error}"); fit_successful = False; break
+                        except RuntimeError as fit_error: st.error(f"RuntimeError fit {fit_num}: {fit_error}"); fit_successful = False; break
+                        except TypeError as fit_error: st.error(f"TypeError fit {fit_num}: {fit_error}"); import traceback; st.error(traceback.format_exc()); fit_successful = False; break
+                        except Exception as fit_error: st.error(f"Unexpected error fit {fit_num}: {fit_error}"); fit_successful = False; break
                         if i < 3 and fit_successful:
-                            slopes = numerical_derivative(fit_func, x_data, popt_current)
-                            total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
-                            total_err_current = safeguard_errors(np.sqrt(total_err_sq)) # Update sigma for next loop
-                        elif not fit_successful: break # Ensure loop breaks if fit fails
+                            slopes = numerical_derivative(fit_func, x_data, popt_current); total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2; total_err_current = safeguard_errors(np.sqrt(total_err_sq))
+                        elif not fit_successful: break
                     # --- End Iterative Loop ---
 
                     fit_progress_area.empty()
-                    if not fit_successful or popt_current is None or pcov_current is None:
-                        st.error("Fit failed or produced invalid results. Cannot proceed."); st.stop()
+                    if not fit_successful or popt_current is None or pcov_current is None: st.error("Fit failed."); st.stop()
 
                     # --- Process Final Results ---
-                    popt_final = popt_current; pcov_final = pcov_current; total_err_final = sigma_to_use # Sigma used in last successful fit call
+                    popt_final = popt_current; pcov_final = pcov_current; total_err_final = sigma_to_use
                     perr_final = np.sqrt(np.diag(pcov_final)); residuals_final = y_data - fit_func(x_data, *popt_final)
                     chi_squared = np.sum((residuals_final / total_err_final)**2); dof = len(y_data) - len(popt_final)
                     chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
                     if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
-                    st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, }
+
+                    # <<< Use original_params list for storing results >>>
+                    st.session_state.fit_results = { "eq_string": processed_eq_string, "params": original_params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, }
                     st.success("Fit completed successfully!")
 
                     # --- Generate Final Plot Figure ---
@@ -337,13 +282,13 @@ if st.session_state.data_loaded:
                     ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
                     fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
 
-                    st.rerun() # Rerun to display results
+                    st.rerun()
 
                 # --- Outer error handling block ---
                 except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
-                except SyntaxError as e_setup: st.error(f"Syntax Error during function compilation?: {e_setup}")
-                except RuntimeError as e_setup: st.error(f"Runtime Error during setup?: {e_setup}")
-                except Exception as e_setup: st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})"); import traceback; st.error(traceback.format_exc())
+                except SyntaxError as e_setup: st.error(f"Syntax Error function compile?: {e_setup}")
+                except RuntimeError as e_setup: st.error(f"Runtime Error setup?: {e_setup}")
+                except Exception as e_setup: st.error(f"Unexpected error: {e_setup}"); import traceback; st.error(traceback.format_exc())
 
     else: # If data is loaded AND results exist, display them
         # --- Display Results Section ---
@@ -351,6 +296,7 @@ if st.session_state.data_loaded:
         if st.session_state.final_fig: st.pyplot(st.session_state.final_fig)
         res = st.session_state.fit_results; table_rows = []
         table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""})
+        # <<< Use res['params'] which now holds original names >>>
         for i, p_name in enumerate(res['params']): table_rows.append({"Category": f"Parameter: {p_name}", "Value": f"{res['popt'][i]:.5g}", "Uncertainty": f"{res['perr'][i]:.3g}"})
         table_rows.append({"Category": "Chi-squared (χ²)", "Value": f"{res['chi2']:.4f}", "Uncertainty": f"{res['chi2_err']:.3f}" if res['dof'] > 0 else ""})
         table_rows.append({"Category": "Degrees of Freedom (DoF)", "Value": f"{res['dof']}", "Uncertainty": ""})
