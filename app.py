@@ -225,86 +225,123 @@ if st.session_state.data_loaded:
         eq_string_input = st.text_input("Equation:", key="equation_input")
         fit_button = st.button("Perform Fit", key="fit_button")
 
-        if fit_button and eq_string_input:
-            st.session_state.final_fig = None
-            with st.spinner("Performing iterative fit... Please wait."):
-                # --- Outer try block for setup and loop ---
+        # --- Inside the Fitting Loop ---
+if fit_button and eq_string_input:
+    st.session_state.final_fig = None
+    with st.spinner("Performing iterative fit... Please wait."):
+        # --- Outer try block ---
+        try:
+            processed_eq_string, params = validate_and_parse_equation(eq_string_input)
+            # --- Function Creation ---
+            st.write("Attempting to create fit function...")
+            try:
+                fit_func = create_fit_function(processed_eq_string, params)
+                st.success("Fit function created successfully.")
+            except (SyntaxError, RuntimeError, Exception) as create_err:
+                 st.error(f"Failed during function creation: {create_err}"); import traceback; st.error(traceback.format_exc()); st.stop()
+
+            x_data = st.session_state.x_data; y_data = st.session_state.y_data; x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
+            popt_current = None; pcov_current = None; total_err_current = y_err_safe; fit_successful = True
+            fit_progress_area = st.empty()
+
+            # --- Iterative Fitting Loop ---
+            for i in range(4):
+                fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
+                p0 = popt_current if i > 0 else None
+                sigma_to_use = total_err_current.copy() # Always use a copy
+
+                # Debug Print
+                with st.expander(f"Debug Info for Fit {fit_num}", expanded=False):
+                    st.write(f"**Inputs:**"); st.write(f"  x_data[:5]: `{x_data[:5]}`"); st.write(f"  y_data[:5]: `{y_data[:5]}`")
+                    st.write(f"  sigma[:5]: `{sigma_to_use[:5]}`"); st.write(f"  sigma min/max: `{np.min(sigma_to_use):.3g}, {np.max(sigma_to_use):.3g}`"); st.write(f"  p0: `{p0}`")
+
+                # --- Inner try for curve_fit call ---
                 try:
-                    processed_eq_string, params = validate_and_parse_equation(eq_string_input)
-                    # <<< Wrapped create_fit_function call >>>
-                    st.write("Attempting to create fit function...")
-                    try:
-                        fit_func = create_fit_function(processed_eq_string, params)
-                        st.success("Fit function created successfully.")
-                    except (SyntaxError, RuntimeError, Exception) as create_err:
-                         st.error(f"Failed during function creation: {create_err}")
-                         # Add traceback for creation errors
-                         import traceback
-                         st.error(traceback.format_exc())
-                         st.stop() # Stop if function creation fails
+                    # <<< MODIFIED curve_fit call: Simplified for Fit 1 >>>
+                    if i == 0: # First fit - try simplifying
+                         st.write(f"Fit {fit_num}: Using simplified curve_fit (no bounds/absolute_sigma)")
+                         popt_current, pcov_current = curve_fit(
+                             fit_func, x_data, y_data,
+                             sigma=sigma_to_use,
+                             # absolute_sigma=True, # Temporarily remove for Fit 1
+                             p0=p0,
+                             maxfev=5000 + i*2000
+                             # bounds=(-np.inf, np.inf) # Temporarily remove for Fit 1
+                         )
+                    else: # Subsequent fits - use full arguments
+                         st.write(f"Fit {fit_num}: Using curve_fit with bounds and absolute_sigma")
+                         popt_current, pcov_current = curve_fit(
+                             fit_func, x_data, y_data,
+                             sigma=sigma_to_use,
+                             absolute_sigma=True, # Restore for later fits
+                             p0=p0,
+                             maxfev=5000 + i*2000,
+                             bounds=(-np.inf, np.inf) # Restore for later fits
+                         )
 
-                    x_data = st.session_state.x_data; y_data = st.session_state.y_data; x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
-                    popt_current = None; pcov_current = None; total_err_current = y_err_safe; fit_successful = True
-                    fit_progress_area = st.empty()
+                    # Check covariance after successful fit
+                    if pcov_current is None or not np.all(np.isfinite(pcov_current)):
+                        st.warning(f"Fit {fit_num} succeeded (popt={popt_current}) but cov matrix non-finite. Stopping iteration.")
+                        fit_successful = False; break # Stop iterating if cov fails
 
-                    # --- Iterative Fitting Loop ---
-                    for i in range(4):
-                        fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
-                        p0 = popt_current if i > 0 else None
-                        with st.expander(f"Debug Info for Fit {fit_num}", expanded=False):
-                            st.write(f"**Inputs:**"); st.write(f"  x_data[:5]: `{x_data[:5]}`"); st.write(f"  y_data[:5]: `{y_data[:5]}`")
-                            st.write(f"  sigma[:5]: `{total_err_current[:5]}`"); st.write(f"  sigma min/max: `{np.min(total_err_current):.3g}, {np.max(total_err_current):.3g}`"); st.write(f"  p0: `{p0}`")
-                        try:
-                            popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=total_err_current.copy(), absolute_sigma=True, p0=p0, maxfev=5000 + i*2000, bounds=(-np.inf, np.inf))
-                            if pcov_current is None or not np.all(np.isfinite(pcov_current)): st.warning(f"Fit {fit_num} succeeded (popt={popt_current}) but cov matrix non-finite."); fit_successful = False; break
-                        except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num} (failed convergence?): {fit_error}"); fit_successful = False; break
-                        except Exception as fit_error: st.error(f"Unexpected error DURING curve_fit {fit_num}: {fit_error} ({type(fit_error).__name__})"); fit_successful = False; break
-                        if i < 3 and fit_successful:
-                            slopes = numerical_derivative(fit_func, x_data, popt_current)
-                            total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
-                            total_err_current = safeguard_errors(np.sqrt(total_err_sq))
-                    # --- End Iterative Loop ---
-
-                    fit_progress_area.empty()
-                    if not fit_successful: st.error("Fit failed during iterations."); st.stop()
-
-                    # --- Process Final Results ---
-                    # ... (Results processing code remains the same) ...
-                    popt_final = popt_current; pcov_final = pcov_current; total_err_final = total_err_current
-                    perr_final = np.sqrt(np.diag(pcov_final)); residuals_final = y_data - fit_func(x_data, *popt_final)
-                    chi_squared = np.sum((residuals_final / total_err_final)**2); dof = len(y_data) - len(popt_final)
-                    chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
-                    if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
-                    st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, }
-                    st.success("Fit completed successfully!")
-
-
-                    # --- Generate Final Plot Figure ---
-                    # ... (Plotting code remains the same) ...
-                    fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-                    ax0 = fig.add_subplot(gs[0]); ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-                    x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200); y_fit_curve = fit_func(x_fit_curve, *popt_final)
-                    ax0.plot(x_fit_curve, y_fit_curve, '-', label='Fit Line (Final Iteration)', zorder=10, linewidth=1.5); ax0.set_ylabel(st.session_state.y_axis_label); plot_title = f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with Final Fit"; ax0.set_title(plot_title); ax0.legend(loc='best'); ax0.grid(True, linestyle=':', alpha=0.6); ax0.tick_params(axis='x', labelbottom=False)
-                    ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
-                    ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-                    ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
-                    fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
-
-                    st.rerun() # Rerun to display results
-
-                # --- Outer error handling block ---
-                except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
-                except SyntaxError as e_setup: st.error(f"Syntax Error during function compilation?: {e_setup}") # Clarified error source
-                except RuntimeError as e_setup: st.error(f"Runtime Error during setup?: {e_setup}") # Clarified error source
-                except Exception as e_setup:
-                    st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})")
+                # Catch errors from curve_fit
+                except ValueError as fit_error: st.error(f"ValueError during fit {fit_num}: {fit_error}"); fit_successful = False; break
+                except RuntimeError as fit_error: st.error(f"RuntimeError during fit {fit_num}: {fit_error}"); fit_successful = False; break
+                except TypeError as fit_error: # <<< Catch the specific TypeError >>>
+                    st.error(f"TypeError during fit {fit_num}: {fit_error} - This often indicates an issue with the function or its interaction with curve_fit.")
                     import traceback
-                    st.error(traceback.format_exc()) # Show full traceback
+                    st.error(traceback.format_exc()) # Show traceback for TypeError
+                    fit_successful = False; break
+                except Exception as fit_error: st.error(f"Unexpected error DURING curve_fit {fit_num}: {fit_error} ({type(fit_error).__name__})"); fit_successful = False; break
+                # --- End Inner try ---
+
+                # Recalculate error if not last fit AND previous fit was successful
+                if i < 3 and fit_successful:
+                    slopes = numerical_derivative(fit_func, x_data, popt_current)
+                    total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
+                    total_err_current = safeguard_errors(np.sqrt(total_err_sq)) # Update sigma for next loop
+                elif not fit_successful:
+                    # Ensure we don't proceed if a fit failed mid-iteration
+                    break
+            # --- End Iterative Loop ---
+
+            fit_progress_area.empty()
+            if not fit_successful or popt_current is None or pcov_current is None: # Check if final results are valid
+                st.error("Fit failed during iterations or produced invalid results. Cannot proceed."); st.stop()
+
+            # --- Process Final Results ---
+            # ... (Rest of result processing, plotting, table, download) ...
+            popt_final = popt_current; pcov_final = pcov_current; total_err_final = sigma_to_use # Use the sigma from the last successful fit call
+            # ... (calculations for perr_final, residuals_final, chi2, etc.) ...
+            perr_final = np.sqrt(np.diag(pcov_final)); residuals_final = y_data - fit_func(x_data, *popt_final)
+            chi_squared = np.sum((residuals_final / total_err_final)**2); dof = len(y_data) - len(popt_final)
+            chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
+            if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
+            st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, }
+            st.success("Fit completed successfully!")
+
+            # --- Generate Final Plot Figure ---
+            # ... (Plotting code remains the same) ...
+            fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+            ax0 = fig.add_subplot(gs[0]); ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+            x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200); y_fit_curve = fit_func(x_fit_curve, *popt_final)
+            ax0.plot(x_fit_curve, y_fit_curve, '-', label='Fit Line (Final Iteration)', zorder=10, linewidth=1.5); ax0.set_ylabel(st.session_state.y_axis_label); plot_title = f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with Final Fit"; ax0.set_title(plot_title); ax0.legend(loc='best'); ax0.grid(True, linestyle=':', alpha=0.6); ax0.tick_params(axis='x', labelbottom=False)
+            ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
+            ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+            ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
+            fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
+
+            st.rerun() # Rerun to display results
+
+        # --- Outer error handling block ---
+        except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
+        except SyntaxError as e_setup: st.error(f"Syntax Error during function compilation?: {e_setup}")
+        except RuntimeError as e_setup: st.error(f"Runtime Error during setup?: {e_setup}")
+        except Exception as e_setup: st.error(f"An unexpected error occurred: {e_setup} ({type(e_setup).__name__})"); import traceback; st.error(traceback.format_exc())
 
     else: # If data is loaded AND results exist, display them
         # --- Display Results Section ---
-        # ... (Results display code remains the same) ...
+        # ... (Remains the same) ...
         st.markdown("---"); st.subheader("Fit Results")
         if st.session_state.final_fig: st.pyplot(st.session_state.final_fig)
         res = st.session_state.fit_results; table_rows = []
@@ -320,7 +357,7 @@ if st.session_state.data_loaded:
             img_buffer = io.BytesIO(); st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1); img_buffer.seek(0)
             st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml")
 
-
 # --- Footer ---
+# ... (Remains the same) ...
 st.markdown("---")
 st.caption("Watermark 'physicsplot.com' added to the main plot.")
