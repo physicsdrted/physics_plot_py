@@ -37,46 +37,59 @@ def validate_and_parse_equation(eq_string):
 # <<< MODIFIED create_fit_function >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Fallback: Initialize result outside main try block."""
+       Uses default arguments to pass necessary variables."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
-    exec_globals = {'np': np, 'ALLOWED_NP_FUNCTIONS': ALLOWED_NP_FUNCTIONS, 'eq_string': eq_string, 'params': params}
+    # We only need np and the function name in the exec global scope
+    exec_globals = {'np': np}
 
-    # Code for the function to be created by exec
+    # Define the debug print function *outside* the string first
+    # This makes it available in the scope where create_fit_function runs
+    def _actual_debug_print(*args, **kwargs):
+        import sys
+        print("DEBUG:", *args, file=sys.stderr, **kwargs)
+
+    # Add it to the globals that will be used as default args
+    exec_globals['_actual_debug_print'] = _actual_debug_print
+    exec_globals['_ALLOWED_NP_FUNCTIONS'] = ALLOWED_NP_FUNCTIONS # Pass the dict
+    exec_globals['_EQ_STRING'] = eq_string # Pass the string
+    exec_globals['_PARAMS_LIST'] = params # Pass the list
+
+    # Modify the function signature and internal references
     func_code = f"""
 import numpy as np
-import sys
+import sys # Keep for safety inside function if needed later, though unlikely
 
-_ALLOWED_NP_FUNCTIONS = ALLOWED_NP_FUNCTIONS
-_EQ_STRING = eq_string
-_PARAMS = params
-
-def _debug_print(*args, **kwargs):
-    print("DEBUG:", *args, file=sys.stderr, **kwargs)
-
-def {func_name}(x, {param_str}):
-    # <<< Initialize result OUTSIDE the main try block >>>
-    result = np.nan
+# Use default arguments to capture external values cleanly
+def {func_name}(x, {param_str},
+                 _eq_str=_EQ_STRING,
+                 _allowed_funcs=_ALLOWED_NP_FUNCTIONS,
+                 _param_names=_PARAMS_LIST,
+                 _debug_func=_actual_debug_print):
+    result = np.nan # Initialize result in function scope
     try:
-        # 1. Build locals & globals
+        # 1. Build locals & globals for eval
         eval_locals = {{'x': x}}; local_args = locals()
-        for p_name in _PARAMS: eval_locals[p_name] = local_args[p_name]
-        eval_globals = {{'np': np}}; eval_globals.update(_ALLOWED_NP_FUNCTIONS); eval_globals['__builtins__'] = {{}}
+        # Use _param_names (passed as default arg)
+        for p_name in _param_names: eval_locals[p_name] = local_args[p_name]
 
-        # _debug_print("--- Inside {func_name} ---"); # Optional prints
-        # _debug_print("Equation:", repr(_EQ_STRING));
-        # _debug_print("Globals Keys:", eval_globals.keys());
-        # _debug_print("Locals:", eval_locals)
+        eval_globals = {{'np': np}}
+        eval_globals.update(_allowed_funcs) # Use _allowed_funcs (passed as default arg)
+        eval_globals['__builtins__'] = {{}}
 
-        # 2. Call eval, store result or keep NaN on failure
+        _debug_func("--- Inside {func_name} ---") # Use _debug_func (passed as default arg)
+        _debug_func("Equation:", repr(_eq_str)) # Use _eq_str (passed as default arg)
+        _debug_func("Globals Keys:", eval_globals.keys())
+        _debug_func("Locals:", eval_locals)
+
+        # 2. Call eval
         try:
-            # Assign to 'result' which is now defined in the function's top scope
-            result = eval(_EQ_STRING, eval_globals, eval_locals)
-            # _debug_print("Eval Raw Result:", repr(result)) # Optional
+            result = eval(_eq_str, eval_globals, eval_locals) # Use _eq_str
+            _debug_func("Eval Raw Result:", repr(result))
         except Exception as e_eval:
-            _debug_print(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            # result remains np.nan from outer initialization
+            _debug_func(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
+            # result remains np.nan
 
         # 3. Validate and Convert result
         if isinstance(result, (np.ndarray, list, tuple)):
@@ -85,38 +98,33 @@ def {func_name}(x, {param_str}):
             result = result.astype(float)
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
-        # Check if result is STILL not numeric
         elif not isinstance(result, (np.ndarray, float)):
-             # Simplified debug print - accesses 'result' safely now
-             _debug_print("Result type is not ndarray or float after initial checks.")
-             _debug_print("Value causing issue:", repr(result))
-             result = np.nan # Ensure non-numeric results become NaN
+             _debug_func("Result type is not ndarray or float after initial checks.")
+             _debug_func("Value causing issue:", repr(result))
+             result = np.nan
 
-        # Final check for NaN/Inf before returning
+        # Final check for NaN/Inf
         if isinstance(result, np.ndarray):
-            if np.all(np.isnan(result)): _debug_print("Warning: Resulting array is all NaNs.")
+            if np.all(np.isnan(result)): _debug_func("Warning: Resulting array is all NaNs.")
             result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
 
-        # _debug_print("Returning:", repr(result)); # Optional
+        _debug_func("Returning:", repr(result))
+        _debug_func("--------------------------")
         return result
 
     except Exception as e_outer:
-        # This outer except block catches errors in build locals/globals etc.
-        _debug_print(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
-        # Fallback return value if outer logic fails
+        _debug_func(f"!!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
         try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
         except: return np.nan
-
 """
     # --- Debugging: Show generated code --- (Keep this)
     st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
 
     local_namespace = {}
     try:
-        exec(func_code, exec_globals, local_namespace) # <<< Error was happening HERE
+        exec(func_code, exec_globals, local_namespace) # exec_globals now provides defaults
     except Exception as e_compile:
-        # This will catch the NameError if it still happens during compilation
         raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
 
     if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
@@ -125,6 +133,7 @@ def {func_name}(x, {param_str}):
     # --- Debugging: Test call --- (Keep this)
     try:
         st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]); test_params = [1.0] * len(params)
+        # Test call now only needs x and the actual parameters (A, B...)
         test_result = created_func(test_x, *test_params)
         st.write(f"  Test call completed. Check terminal/log for 'DEBUG:' output.")
         st.write(f"  Test call returned: {test_result}")
@@ -134,26 +143,7 @@ def {func_name}(x, {param_str}):
         st.error(f"Error during test call of created function: {e_test} ({type(e_test).__name__})"); raise RuntimeError("Test call failed.") from e_test
 
     return created_func
-
-# --- Main App Logic ---
-# ... (Rest of the app.py code remains the same as the previous full version) ...
-# --- Include: ---
-# st.title(...)
-# st.write(...)
-# Session State Init
-# File Uploader
-# File processing logic (if uploaded_file...)
-# Display Data Preview and Initial Plot (if data_loaded...)
-# Fitting Controls OR Results display section (if/else based on fit_results...)
-    # Fitting Button Logic
-        # Outer try/except for setup/loop
-            # Iterative loop
-                # Inner try/except for curve_fit
-            # Process Final Results
-            # Generate Final Plot Figure
-            # st.rerun()
-        # Display Results Section (plot, table, download)
-# Footer
+    
     # <<< END MODIFIED create_fit_function >>>
 
 
