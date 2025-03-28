@@ -23,11 +23,12 @@ plt.rcParams['font.family'] = 'STIXGeneral'
 # This selector might need adjustment if Streamlit's internal structure changes.
 st.markdown("""
 <style>
-.stDataFrame table th {
-    font-size: 20px; /* Header font size */
+div[data-testid="stDataFrame"] table th { /* Targets header cells */
+    font-size: 2.0em !important; /* Increase header font size */
+    font-weight: bold !important; /* Ensure header is bold */
 }
-.stDataFrame table td {
-    font-size: 18px; /* Data cell font size */
+div[data-testid="stDataFrame"] table td { /* Targets data cells */
+    font-size: 1.7em !important; /* Increase data cell font size */
 }
 </style>
 """, unsafe_allow_html=True)
