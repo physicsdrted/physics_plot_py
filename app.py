@@ -37,35 +37,63 @@ def validate_and_parse_equation(eq_string):
     if not params: raise ValueError("No fit parameters (A-Z) found.")
     return eq_string, params
 
+# <<< CORRECTED create_fit_function (Removed rogue 'f') >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
-    eval_locals_assignments = [f("'{p}': {p}") for p in params]; eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
+    # String representation for eval_locals dictionary construction
+    # <<< CORRECTED THIS LINE >>>
+    eval_locals_assignments = [f"'{p}': {{p}}" for p in params] # Use f-string correctly HERE
+    eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
+    # Code string to be executed
     func_code = f"""
 import numpy as np
+# SAFE_GLOBALS and eq_string are implicitly captured from exec_globals
 def {func_name}(x, {param_str}):
-    result = np.nan
+    result = np.nan # Initialize result BEFORE the main try block
     try:
-        eval_locals = {eval_locals_str}
-        try: result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
-        except Exception as e_eval: result = np.nan
-        if isinstance(result, (np.ndarray, list, tuple)): result = np.asarray(result);
+        # Build locals dict for eval using function arguments
+        eval_locals = {eval_locals_str} # <<< This uses the formatted string
+        # Call eval using captured SAFE_GLOBALS and the constructed locals
+        # Use _EQ_STRING and _SAFE_GLOBALS passed via exec_globals
+        try:
+            result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
+        except Exception as e_eval:
+            # print(f"DEBUG: !!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
+            result = np.nan # Assign NaN if eval fails
+
+        # --- Validation/Conversion ---
+        if isinstance(result, (np.ndarray, list, tuple)):
+            result = np.asarray(result);
+            if np.iscomplexobj(result): result = np.real(result)
+            result = result.astype(float);
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
-        elif not isinstance(result, (np.ndarray, float)): result = np.nan
+        elif not isinstance(result, (np.ndarray, float)):
+             # print(f"DEBUG: Result type not ndarray/float after checks. Val: {{repr(result)}}")
+             result = np.nan
+
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
         return result
+    # --- Error Handling for outer logic ---
     except Exception as e_outer:
+        # print(f"DEBUG: !!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
         try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
         except: return np.nan
 """
+    # Globals needed when compiling the function via exec
     exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string}
     local_namespace = {}
-    try: exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile: raise SyntaxError(f"Compile failed: {e_compile}") from e_compile
-    if func_name not in local_namespace: raise RuntimeError(f"Function creation failed.")
+    try:
+        exec(func_code, exec_globals, local_namespace)
+    except Exception as e_compile:
+        st.error("--- Failed Code Compilation ---"); st.code(func_code, language='python'); st.error("--------------------")
+        raise SyntaxError(f"Failed to compile function: {e_compile} ({type(e_compile).__name__})") from e_compile
+    if func_name not in local_namespace:
+        raise RuntimeError(f"Function '{func_name}' not found after exec.")
     return local_namespace[func_name]
+# <<< END CORRECTED create_fit_function >>>
 
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
