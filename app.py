@@ -45,58 +45,63 @@ def validate_and_parse_equation(eq_string):
 
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string.
-       Uses default arguments to pass necessary variables."""
+       Passes required globals for eval as default arguments."""
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
-    # Define the debug print function *outside* the string first
+    # Only need 'np' and the function name in exec's global scope initially
+    exec_globals = {'np': np}
+
+    # Define debug print function in the outer scope
     def _actual_debug_print(*args, **kwargs):
         import sys
         print("DEBUG:", *args, file=sys.stderr, **kwargs)
 
-    # Variables needed in the global scope where exec runs for defaults
-    exec_globals = {'np': np}
-    exec_globals['_actual_debug_print'] = _actual_debug_print
-    exec_globals['_ALLOWED_NP_FUNCTIONS'] = ALLOWED_NP_FUNCTIONS # Pass the dict
-    exec_globals['_EQ_STRING'] = eq_string # Pass the string
-    exec_globals['_PARAMS_LIST'] = params # Pass the list
+    # Add values needed as defaults to exec_globals
+    exec_globals['_ALLOWED_NP_FUNCTIONS_DEFAULT'] = ALLOWED_NP_FUNCTIONS
+    exec_globals['_EQ_STRING_DEFAULT'] = eq_string
+    exec_globals['_DEBUG_FUNC_DEFAULT'] = _actual_debug_print
 
-    # Modify the function signature and internal references
+    # Define the function signature with defaults for the required globals
     func_code = f"""
 import numpy as np
 import sys
 
-# Use default arguments to capture external values cleanly
+# Capture external values via default arguments
 def {func_name}(x, {param_str},
-                 _eq_str=_EQ_STRING,
-                 _allowed_funcs=_ALLOWED_NP_FUNCTIONS,
-                 _param_names=_PARAMS_LIST,
-                 _debug_func=_actual_debug_print):
+                 _eq_str=_EQ_STRING_DEFAULT,
+                 _allowed_funcs=_ALLOWED_NP_FUNCTIONS_DEFAULT,
+                 _debug_func=_DEBUG_FUNC_DEFAULT):
     result = np.nan # Initialize result in function scope
     try:
-        # 1. Build locals & globals for eval
-        eval_locals = {{'x': x}}; local_args = locals()
-        # Use _param_names (passed as default arg)
-        for p_name in _param_names: eval_locals[p_name] = local_args[p_name]
+        # 1. Build eval_locals: Only x and the parameters (A, B, ...)
+        eval_locals = {{'x': x}}
+        local_args = locals() # Contains x, A, B, ... and the default args (_eq_str, etc.)
+        # Use 'params' list passed during creation to get only A, B...
+        param_names_list = {params!r} # Embed the actual list ['A', 'B'] safely
+        for p_name in param_names_list:
+            eval_locals[p_name] = local_args[p_name]
 
+        # 2. Build eval_globals: Only np and allowed functions
         eval_globals = {{'np': np}}
-        eval_globals.update(_allowed_funcs) # Use _allowed_funcs (passed as default arg)
+        eval_globals.update(_allowed_funcs) # Use default arg
         eval_globals['__builtins__'] = {{}}
 
-        # _debug_func("--- Inside {func_name} ---") # Optional prints
-        # _debug_func("Equation:", repr(_eq_str))
-        # _debug_func("Globals Keys:", eval_globals.keys())
-        # _debug_func("Locals:", eval_locals)
+        # Debug prints (using default arg _debug_func)
+        _debug_func("--- Inside {func_name} ---")
+        _debug_func("Equation:", repr(_eq_str))
+        _debug_func("Globals Keys:", eval_globals.keys())
+        _debug_func("Locals:", eval_locals)
 
-        # 2. Call eval
+        # 3. Call eval
         try:
-            result = eval(_eq_str, eval_globals, eval_locals) # Use _eq_str
-            # _debug_func("Eval Raw Result:", repr(result)) # Optional
+            result = eval(_eq_str, eval_globals, eval_locals)
+            _debug_func("Eval Raw Result:", repr(result))
         except Exception as e_eval:
             _debug_func(f"!!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            # result remains np.nan from outer initialization
+            # result remains np.nan
 
-        # 3. Validate and Convert result
+        # 4. Validate and Convert result
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
@@ -104,17 +109,14 @@ def {func_name}(x, {param_str},
         elif isinstance(result, complex): result = float(result.real)
         elif isinstance(result, (int, float)): result = float(result)
         elif not isinstance(result, (np.ndarray, float)):
-             _debug_func("Result type is not ndarray or float after initial checks.")
-             _debug_func("Value causing issue:", repr(result))
+             _debug_func("Result type not ndarray/float after checks. Val:", repr(result))
              result = np.nan
 
         # Final check for NaN/Inf
-        if isinstance(result, np.ndarray):
-            if np.all(np.isnan(result)): _debug_func("Warning: Resulting array is all NaNs.")
-            result[~np.isfinite(result)] = np.nan
+        if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
 
-        # _debug_func("Returning:", repr(result)); # Optional
+        _debug_func("Returning:", repr(result)); _debug_func("--------------------------")
         return result
 
     except Exception as e_outer:
@@ -136,7 +138,10 @@ def {func_name}(x, {param_str},
 
     # --- Debugging: Test call ---
     try:
-        st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]); test_params = [1.0] * len(params)
+        st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]);
+        # Get number of params needed from the list passed to this outer function
+        test_params = [1.0] * len(params)
+        # Test call provides only x and the actual fit parameters
         test_result = created_func(test_x, *test_params)
         st.write(f"  Test call completed. Check terminal/log for 'DEBUG:' output.")
         st.write(f"  Test call returned: {test_result}")
