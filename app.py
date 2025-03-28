@@ -24,10 +24,10 @@ plt.rcParams['font.family'] = 'STIXGeneral'
 st.markdown("""
 <style>
 .stDataFrame table th {
-    font-size: 16px; /* Header font size */
+    font-size: 20px; /* Header font size */
 }
 .stDataFrame table td {
-    font-size: 15px; /* Data cell font size */
+    font-size: 18px; /* Data cell font size */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -259,7 +259,7 @@ if st.session_state.data_loaded:
         *   Use `x` for the independent variable.
         *   Use single uppercase letters (A-Z) for fit parameters.
         *   Use standard Python math operators: `+`, `-`, `*`, `/`, `**` (power).
-        *   Allowed functions (use directly or with `np.` prefix):
+        *   Allowed functions:
             `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `atan`,
             `sinh`, `cosh`, `tanh`, `exp`, `log` (natural), `ln` (natural), `log10`,
             `sqrt`, `abs`, `absolute`.
