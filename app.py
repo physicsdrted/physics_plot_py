@@ -89,56 +89,80 @@ def format_equation_mathtext(eq_string):
 # (create_fit_function, numerical_derivative, safeguard_errors remain the same
 # as the last working version - the one fixing the NameError)
 # ...
+# <<< CORRECTED create_fit_function (Reverted to working version before default arg attempts) >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
-    eval_locals_assignments = [f"'{p}': {p}" for p in params]
+    # String representation for eval_locals dictionary construction
+    eval_locals_assignments = [f("'{p}': {p}") for p in params]
     eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
+    # Code string to be executed
     func_code = f"""
 import numpy as np
 # SAFE_GLOBALS and eq_string are implicitly captured from exec_globals
 def {func_name}(x, {param_str}):
-    result = np.nan # Initialize result BEFORE main try block
+    # <<< Initialize result BEFORE the main try block >>>
+    result = np.nan
     try:
         # Build locals dict for eval using function arguments
         eval_locals = {eval_locals_str}
         # Call eval using captured SAFE_GLOBALS and the constructed locals
         # Use _EQ_STRING and _SAFE_GLOBALS passed via exec_globals
         try:
+            # Assign directly to 'result' defined above
             result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
         except Exception as e_eval:
-            # print(f"DEBUG: Error eval '{_EQ_STRING}' during fit: {{repr(e_eval)}} ({{type(e_eval).__name__}})")
-            result = np.nan # Ensure result is NaN if eval fails
+            # print(f"DEBUG: !!! ERROR during eval: {{repr(e_eval)}} ({{type(e_eval).__name__}})") # Safe debug print
+            result = np.nan # Assign NaN if eval fails
 
         # --- Validation/Conversion ---
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result);
-            if np.iscomplexobj(result): result = np.real(result)
+            if np.iscomplexobj(result): result = np.real(result) # Removed print
             result = result.astype(float);
-        elif isinstance(result, complex): result = float(result.real)
+        elif isinstance(result, complex): result = float(result.real) # Removed print
         elif isinstance(result, (int, float)): result = float(result)
+        # Check if result is STILL not numeric
         elif not isinstance(result, (np.ndarray, float)):
-             # print(f"DEBUG: Result type not ndarray/float after checks. Val: {{repr(result)}}")
+             # print(f"DEBUG: Result type not ndarray/float after checks. Val: {{repr(result)}}") # Safe debug print
              result = np.nan # Ensure non-numeric results become NaN
 
         # Final check for NaN/Inf
-        if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
-        elif not np.isfinite(result): result = np.nan
+        if isinstance(result, np.ndarray):
+             # if np.all(np.isnan(result)): print("DEBUG: Warning: Resulting array is all NaNs.") # Safe debug print
+             result[~np.isfinite(result)] = np.nan
+        elif not np.isfinite(result):
+             result = np.nan
+
         return result
 
     # --- Error Handling for outer logic ---
     except Exception as e_outer:
-        # print(f"DEBUG: !!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}")
+        # print(f"DEBUG: !!! ERROR in outer try block of {func_name}: {{repr(e_outer)}}") # Safe debug print
         try: return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
         except: return np.nan
 """
-    exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string}
+    # Globals needed when compiling the function via exec
+    exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string} # Pass them with _ prefix
     local_namespace = {}
-    try: exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile: raise SyntaxError(f"Failed to compile function: {e_compile} ({type(e_compile).__name__})") from e_compile
-    if func_name not in local_namespace: raise RuntimeError(f"Function '{func_name}' not found after exec.")
-    return local_namespace[func_name]
+    try:
+        # Debug: Print the code one last time before exec
+        # st.markdown("---"); st.subheader("Debug: Final Generated Code"); st.code(func_code, language='python'); st.markdown("---")
+        exec(func_code, exec_globals, local_namespace)
+    except Exception as e_compile:
+        # Print details if compilation fails
+        st.error("--- Failed Code Compilation ---")
+        st.code(func_code, language='python')
+        st.error("--------------------")
+        raise SyntaxError(f"Failed to compile function: {e_compile} ({type(e_compile).__name__})") from e_compile
 
+    if func_name not in local_namespace:
+        # Should not happen if exec succeeds without SyntaxError
+        raise RuntimeError(f"Function '{func_name}' not found after exec.")
+
+    # NO test call here, return the created function directly
+    return local_namespace[func_name]
+# <<< END CORRECTED create_fit_function >>>
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
     try:
