@@ -17,6 +17,22 @@ st.set_page_config(page_title="Physics Plot Fitter", layout="wide")
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 
+# --- <<< Inject CSS to increase DataFrame font size >>> ---
+# Adjust the font-size value (e.g., 16px, 1.1em) as needed.
+# The selector targets header (th) and data (td) cells within stDataFrame elements.
+# This selector might need adjustment if Streamlit's internal structure changes.
+st.markdown("""
+<style>
+.stDataFrame table th {
+    font-size: 16px; /* Header font size */
+}
+.stDataFrame table td {
+    font-size: 15px; /* Data cell font size */
+}
+</style>
+""", unsafe_allow_html=True)
+# --- <<< End CSS Injection >>> ---
+
 # --- Allowed characters and functions ---
 ALLOWED_CHARS = r"^[A-Za-z0-9\s\.\+\-\*\/\(\)\,\_\^]+$"
 ALLOWED_NP_FUNCTIONS = {
