@@ -49,38 +49,49 @@ def create_fit_function(eq_string, params):
     func_name = "dynamic_fit_func"
     param_str = ', '.join(params)
 
-    exec_globals = {'np': np}
-    def _actual_debug_print(*args, **kwargs): import sys; print("DEBUG:", *args, file=sys.stderr, **kwargs)
-    exec_globals['_actual_debug_print'] = _actual_debug_print
-    exec_globals['_ALLOWED_NP_FUNCTIONS_DEFAULT'] = ALLOWED_NP_FUNCTIONS
-    exec_globals['_EQ_STRING_DEFAULT'] = eq_string
-    # We don't need to pass the param list as a default anymore
+    # Define debug print function in the outer scope
+    def _actual_debug_print(*args, **kwargs):
+        import sys
+        print("DEBUG:", *args, file=sys.stderr, **kwargs)
+
+    # <<< CORRECTED exec_globals definition >>>
+    # Globals needed when the function *definition* runs (via exec)
+    # These provide the default values for the function's arguments.
+    exec_globals = {
+        'np': np,
+        '_EQ_STRING_DEFAULT': eq_string,
+        '_ALLOWED_NP_FUNCTIONS_DEFAULT': ALLOWED_NP_FUNCTIONS,
+        '_DEBUG_FUNC_DEFAULT': _actual_debug_print
+        # We no longer need _PARAMS_LIST here
+    }
 
     # Define the function signature with defaults for globals only
     func_code = f"""
 import numpy as np
 import sys
 
+# Capture external values via default arguments
 def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
                  _eq_str=_EQ_STRING_DEFAULT,
                  _allowed_funcs=_ALLOWED_NP_FUNCTIONS_DEFAULT,
                  _debug_func=_DEBUG_FUNC_DEFAULT):
     result = np.nan
     try:
-        # 1. Build eval_globals (np and allowed functions)
+        # 1. Build eval_globals: Only np and allowed functions
         eval_globals = {{'np': np}}
-        eval_globals.update(_allowed_funcs)
+        eval_globals.update(_allowed_funcs) # Use default arg
         eval_globals['__builtins__'] = {{}}
 
         # 2. Build eval_locals: Use locals() DIRECTLY from this scope
         #    It automatically contains x, A, B... passed as arguments
         eval_locals = locals()
 
-        # Debug prints
+        # Debug prints (using default arg _debug_func)
         _debug_func("--- Inside {func_name} ---")
         _debug_func("Equation:", repr(_eq_str))
         _debug_func("Globals Keys:", eval_globals.keys())
-        _debug_func("Locals Keys available to eval:", eval_locals.keys()) # Show what keys eval sees
+        # Be careful printing full locals() if default args are complex objects
+        _debug_func("Locals Keys available to eval:", [k for k in eval_locals.keys() if not k.startswith('_')]) # Show only x, A, B... keys
 
         # 3. Call eval
         try:
@@ -92,6 +103,7 @@ def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
             # result remains np.nan
 
         # 4. Validate and Convert result
+        # ... (validation logic remains the same) ...
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result)
             if np.iscomplexobj(result): result = np.real(result)
@@ -101,8 +113,6 @@ def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
         elif not isinstance(result, (np.ndarray, float)):
              _debug_func("Result type not ndarray/float after checks. Val:", repr(result))
              result = np.nan
-
-        # Final check for NaN/Inf
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
 
@@ -118,14 +128,19 @@ def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
     st.markdown("---"); st.subheader("Debug: Generated Fit Function Code"); st.code(func_code, language='python'); st.markdown("---")
 
     local_namespace = {}
-    try: exec(func_code, exec_globals, local_namespace)
-    except Exception as e_compile: raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
+    try:
+        # Execute using the corrected exec_globals
+        exec(func_code, exec_globals, local_namespace)
+    except Exception as e_compile:
+        raise SyntaxError(f"Failed to compile generated function: {e_compile} ({type(e_compile).__name__})") from e_compile
+
     if func_name not in local_namespace: raise RuntimeError(f"Failed to create function '{func_name}' via exec.")
     created_func = local_namespace[func_name]
 
     # --- Debugging: Test call ---
     try:
         st.write("Debug: Testing created function call..."); test_x = np.array([1.0, 2.0, 3.0]);
+        # Get number of params needed from the original list
         test_params = [1.0] * len(params)
         test_result = created_func(test_x, *test_params)
         st.write(f"  Test call completed. Check terminal/log for 'DEBUG:' output.")
@@ -137,6 +152,18 @@ def {func_name}(x, {param_str}, # Only x and the fit parameters A, B...
 
     return created_func
 
+# --- Main App Logic ---
+# ... (Rest of app.py remains the same as previous version with the corrected create_fit_function) ...
+# --- Include: ---
+# st.title(...)
+# st.write(...)
+# Session State Init
+# File Uploader
+# File processing logic (if uploaded_file...)
+# Display Data Preview and Initial Plot (if data_loaded...)
+# Fitting Controls OR Results display section (if/else based on fit_results...)
+    # Fitting Button Logic (calls create_fit_function, iterative curve_fit, etc.)
+# Footer
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
     try:
