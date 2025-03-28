@@ -116,58 +116,70 @@ def safeguard_errors(err_array, min_err=1e-9):
 # <<< NEW Function to Format Equation for Mathtext >>>
 def format_equation_mathtext(eq_string_orig):
     """Attempts to format the equation string for Matplotlib's mathtext."""
-    # Work on a copy
     formatted = eq_string_orig
-    # Basic replacements - order can matter
-    # Use raw strings (r'...') for LaTeX commands
+    st.write(f"DEBUG: Initial format string: `{formatted}`") # Debug
 
-    # Handle potential functions first (needs careful regex)
-    formatted = re.sub(r'np\.exp\((.*?)\)', r'e^{\\1}', formatted)
-    formatted = re.sub(r'\bexp\((.*?)\)', r'e^{\\1}', formatted)
-    formatted = re.sub(r'np\.sqrt\((.*?)\)', r'\\sqrt{\\1}', formatted)
-    formatted = re.sub(r'\bsqrt\((.*?)\)', r'\\sqrt{\\1}', formatted)
-    formatted = re.sub(r'np\.sin\((.*?)\)', r'\\mathrm{sin}(\\1)', formatted)
-    formatted = re.sub(r'\bsin\((.*?)\)', r'\\mathrm{sin}(\\1)', formatted)
-    formatted = re.sub(r'np\.cos\((.*?)\)', r'\\mathrm{cos}(\\1)', formatted)
-    formatted = re.sub(r'\bcos\((.*?)\)', r'\\mathrm{cos}(\\1)', formatted)
-    formatted = re.sub(r'np\.tan\((.*?)\)', r'\\mathrm{tan}(\\1)', formatted)
-    formatted = re.sub(r'\btan\((.*?)\)', r'\\mathrm{tan}(\\1)', formatted)
-    formatted = re.sub(r'np\.log10\((.*?)\)', r'\\log_{10}(\\1)', formatted)
-    formatted = re.sub(r'\blog10\((.*?)\)', r'\\log_{10}(\\1)', formatted)
-    formatted = re.sub(r'np\.ln\((.*?)\)', r'\\ln(\\1)', formatted)
-    formatted = re.sub(r'\bln\((.*?)\)', r'\\ln(\\1)', formatted)
-    formatted = re.sub(r'np\.log\((.*?)\)', r'\\ln(\\1)', formatted)
-    formatted = re.sub(r'\blog\((.*?)\)', r'\\ln(\\1)', formatted)
+    # Handle functions (use raw strings for replacement!)
+    # Use \1, \2 etc for capture groups in replacement
+    formatted = re.sub(r'np\.exp\((.*?)\)', r'e^{\1}', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\bexp\((.*?)\)', r'e^{\1}', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.sqrt\((.*?)\)', r'\\sqrt{\1}', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\bsqrt\((.*?)\)', r'\\sqrt{\1}', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.sin\((.*?)\)', r'\\mathrm{sin}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\bsin\((.*?)\)', r'\\mathrm{sin}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.cos\((.*?)\)', r'\\mathrm{cos}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\bcos\((.*?)\)', r'\\mathrm{cos}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.tan\((.*?)\)', r'\\mathrm{tan}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\btan\((.*?)\)', r'\\mathrm{tan}(\\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.log10\((.*?)\)', r'\\log_{10}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\blog10\((.*?)\)', r'\\log_{10}(\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.ln\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE) # Keep extra \ for ln? Test this.
+    formatted = re.sub(r'\bln\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.log\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\blog\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
+    # Add more functions as needed (e.g., abs)
+    formatted = re.sub(r'np\.abs\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\babs\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'np\.absolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r'\babsolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
 
-    # Handle operators and powers AFTER functions
-    formatted = formatted.replace('**', '^')       # Python power to mathtext power
-    formatted = formatted.replace('*', r'\cdot ')  # Multiplication
-    # Keep simple slash for division for now, \frac requires more complex parsing
-    formatted = formatted.replace('/', r'/')
+    st.write(f"DEBUG: After func replace: `{formatted}`") # Debug
 
-    # Handle pi
+    # Handle pi AFTER functions
     formatted = formatted.replace('np.pi', r'\pi')
     formatted = formatted.replace('pi', r'\pi')
 
-    # Ensure variables/params render correctly in math mode
-    # Replace single uppercase letters (params) with {P}
-    formatted = re.sub(r'\b([A-Z])\b', r'{\1}', formatted)
-    # Replace 'x' with {x}
-    formatted = formatted.replace('x', '{x}')
+    # Handle operators and powers
+    formatted = formatted.replace('**', '^')
+    formatted = formatted.replace('*', r'\cdot ')
+    formatted = formatted.replace('/', r'/') # Keep simple slash
 
-    # Add $ signs for mathtext mode
-    formatted = f'${formatted}$'
+    st.write(f"DEBUG: After ops replace: `{formatted}`") # Debug
 
-    # Prepend 'y = ' (outside the initial $ for normal text)
-    formatted = f'$y = {formatted[1:]}' # Add y=, remove first $
+    # Prepare for math mode: put variables/params in braces {}
+    # Need to be careful not to replace inside already processed parts e.g. ^{...}
+    # Using placeholders might be safer but more complex. Let's try direct replacement first.
+    formatted_final = formatted
+    try:
+        # Replace single uppercase letters ONLY if not preceded/followed by alphanumeric or _ or { or }
+        # This avoids replacing 'A' in 'Abs' or '{A}'
+        formatted_final = re.sub(r'(?<![a-zA-Z0-9_{])([A-Z])(?![a-zA-Z0-9_}])', r'{\1}', formatted_final)
+        # Replace 'x' ONLY if not preceded/followed by alphanumeric or _ or { or }
+        formatted_final = re.sub(r'(?<![a-zA-Z0-9_{])(x)(?![a-zA-Z0-9_}])', r'{x}', formatted_final)
+    except Exception as e_re:
+        st.warning(f"Regex warning during brace insertion: {e_re}. Using previous format.")
+        # Fallback to formatted before brace insertion if regex fails
 
-    # Cleanup common issues like double spaces or space before/after operators
-    formatted = re.sub(r'\s*\^\s*', '^', formatted) # Remove space around ^
-    formatted = re.sub(r'\s*\\cdot\s*', r'\\cdot ', formatted) # Ensure space after cdot
-    formatted = re.sub(r'\s*([\+\-\/])\s*', r' \1 ', formatted) # Ensure space around +,-,/
-    formatted = formatted.replace('$$', '$') # Remove potential double dollars
+    st.write(f"DEBUG: After brace insert: `{formatted_final}`") # Debug
 
-    return formatted
+    # Add $ signs and y =
+    formatted_final = f'$y = {formatted_final}$'
+    # Simple cleanup
+    formatted_final = formatted_final.replace('$$', '$') # Remove double dollars
+    formatted_final = re.sub(r'\s{2,}', ' ', formatted_final) # Condense multiple spaces
+
+    st.write(f"DEBUG: Final formatted string: `{formatted_final}`") # Debug
+    return formatted_final
 
 
 # --- Main App Logic ---
