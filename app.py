@@ -44,66 +44,51 @@ def validate_and_parse_equation(eq_string):
     return eq_string, params
 
 # <<< REVERTED create_fit_function to working script version >>>
+# <<< REVERTED create_fit_function to working script version >>>
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
-    # String representation for eval_locals dictionary construction
     eval_locals_assignments = [f"'{p}': {p}" for p in params]
     eval_locals_str = f"{{'x': x, {', '.join(eval_locals_assignments)}}}"
-    # Code string to be executed
     func_code = f"""
 import numpy as np
 # SAFE_GLOBALS and eq_string are implicitly captured from exec_globals
 def {func_name}(x, {param_str}):
     try:
-        # Build locals dict for eval using function arguments
         eval_locals = {eval_locals_str}
-        # Call eval using captured SAFE_GLOBALS and the constructed locals
         # Use _EQ_STRING and _SAFE_GLOBALS passed via exec_globals
         result = eval(_EQ_STRING, _SAFE_GLOBALS, eval_locals)
 
         # --- Validation/Conversion ---
         if isinstance(result, (np.ndarray, list, tuple)):
             result = np.asarray(result);
-            if np.iscomplexobj(result): result = np.real(result) # Removed print for web app
+            if np.iscomplexobj(result): result = np.real(result) # Removed print
             result = result.astype(float);
         elif isinstance(result, complex): result = float(result.real) # Removed print
         elif isinstance(result, (int, float)): result = float(result)
         else: raise TypeError(f"Equation returned non-numeric type: {{type(result)}}")
 
-        # Replace NaN/Inf before returning, required by curve_fit default
         if isinstance(result, np.ndarray): result[~np.isfinite(result)] = np.nan
         elif not np.isfinite(result): result = np.nan
         return result
 
     # --- Error Handling ---
     except ZeroDivisionError:
-        # print(f"DEBUG: Error eval '{_EQ_STRING}': Division by zero.") # Use print for terminal debug
+        # print(f"DEBUG: Error eval: Division by zero.") # <<< FIXED COMMENT >>>
         return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
     except Exception as e:
-        # print(f"DEBUG: Error eval '{_EQ_STRING}' during fit: {{e}} ({{type(e).__name__}})") # Use print
+        # print(f"DEBUG: Error eval during fit: {{e}} ({{type(e).__name__}})") # <<< FIXED COMMENT >>>
         return np.nan * np.ones_like(x) if isinstance(x, np.ndarray) else np.nan
 """
     # Globals needed when compiling the function via exec
-    # Renaming to avoid potential conflict if SAFE_GLOBALS is modified later
-    exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string}
+    exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string} # Pass them with _ prefix
     local_namespace = {}
     try:
-        # Debug: Print the code one last time before exec
-        # st.markdown("---"); st.subheader("Debug: Final Generated Code"); st.code(func_code, language='python'); st.markdown("---")
         exec(func_code, exec_globals, local_namespace)
     except Exception as e_compile:
-        # Print details if compilation fails
-        st.error("--- Failed Code Compilation ---")
-        st.code(func_code, language='python')
-        st.error("--------------------")
+        st.error("--- Failed Code Compilation ---"); st.code(func_code, language='python'); st.error("--------------------")
         raise SyntaxError(f"Failed to compile function: {e_compile} ({type(e_compile).__name__})") from e_compile
-
-    if func_name not in local_namespace:
-        # Should not happen if exec succeeds without SyntaxError
-        raise RuntimeError(f"Function '{func_name}' not found after exec.")
-
-    # NO test call here, return the created function directly
+    if func_name not in local_namespace: raise RuntimeError(f"Function '{func_name}' not found after exec.")
     return local_namespace[func_name]
 # <<< END REVERTED create_fit_function >>>
 
