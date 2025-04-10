@@ -16,6 +16,9 @@ st.set_page_config(page_title="Physics Plot Fitter", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
+plt.rcParams['axes.labelsize'] = 16
+plt.rcParams['axes.labelsize'] = 20
+
 
 # --- Allowed characters and functions ---
 ALLOWED_CHARS = r"^[A-Za-z0-9\s\.\+\-\*\/\(\)\,\_\^]+$"
