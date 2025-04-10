@@ -12,12 +12,12 @@ from scipy.optimize import curve_fit
 from matplotlib.gridspec import GridSpec
 
 # --- Configuration ---
-st.set_page_config(page_title="Physics Plot Fitter", layout="wide")
+st.set_page_config(page_title="Physics Plot", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 plt.rcParams['axes.labelsize'] = 16
-plt.rcParams['axes.labelsize'] = 20
+plt.rcParams['axes.titlesize'] = 20
 
 
 # --- Allowed characters and functions ---
@@ -315,7 +315,7 @@ if st.session_state.data_loaded:
                     chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
                     if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
                     user_title_str = title_input.strip();
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with Final Fit"
+                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
                     st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, "plot_title": final_plot_title, "legend_label": legend_label_str } # Store formatted label
                     st.success("Fit completed successfully!")
 
