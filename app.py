@@ -16,6 +16,7 @@ st.set_page_config(page_title="Physics Plot", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
+# tell MatPlotLib to use larger fonts for the title and axis labels
 plt.rcParams['axes.labelsize'] = 16
 plt.rcParams['axes.titlesize'] = 20
 
@@ -195,6 +196,7 @@ custom_html = """
     }
     .banner img {
         width: 100%;
+        height: auto;
         object-fit: contain;
     }
 </style>
