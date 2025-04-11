@@ -410,9 +410,6 @@ if st.session_state.data_loaded:
                     step=0.1, # Optional: add step for easier adjustment
                     format="%.3f" # Optional: format display
                 )
-                # Update session state immediately if value changes (Streamlit does this implicitly on interaction)
-                st.session_state[guess_key] = initial_guesses[param]
-
 
         # --- Preview Plot ---
         st.markdown("---")
