@@ -207,14 +207,27 @@ st.components.v1.html(custom_html)
 #st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
-with open("https://raw.githubusercontent.com/physicsdrted/physics_plot_py/refs/heads/main/data.csv", "r") as examplefile:
-    st.download_button(
-        label="Download Example CSV",
-        data=examplefile,
-        file_name="data.csv",
-        mime="text/csv",
-        icon=":material/download:",
+@st.cache_data
+def get_data():
+    df = pd.DataFrame(
+        np.random.randn(50, 20), columns=("col %d" % i for i in range(20))
     )
+    return df
+
+@st.cache_data
+def convert_for_download(df):
+    return df.to_csv().encode("utf-8")
+
+df = get_data()
+csv = convert_for_download(df)
+
+st.download_button(
+    label="Download CSV",
+    data=csv,
+    file_name="data.csv",
+    mime="text/csv",
+    icon=":material/download:",
+)
 
 
 # --- Session State Initialization ---
