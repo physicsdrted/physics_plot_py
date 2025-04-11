@@ -207,13 +207,14 @@ st.components.v1.html(custom_html)
 #st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
-st.download_button(
-    label="Download an example CSV",
-    data=csv,
-    file_name="data.csv",
-    mime="text/csv",
-    icon=":material/download:",
-)
+with open("data.csv", "r") as file:
+    st.download_button(
+        label="Download Example CSV",
+        data=file,
+        file_name="data.csv",
+        mime="text/csv",
+        icon=":material/download:",
+    )
 
 
 # --- Session State Initialization ---
