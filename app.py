@@ -190,10 +190,11 @@ custom_html = """
 <style>
     .banner {
         width: 100%;
-        height: 200px;
+        height: 300px;
         overflow: visible;
     }
     .banner img {
+        width: 100%;
         object-fit: contain;
     }
 </style>
