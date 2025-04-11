@@ -185,7 +185,7 @@ def format_equation_mathtext(eq_string_orig):
 #custom HTML for banner
 custom_html = """
 <div class="banner">
-    <img src="https://github.com/physicsdrted/physics_plot_py/blob/main/logo.png" alt="Banner Image">
+    <img src="https://raw.githubusercontent.com/physicsdrted/physics_plot_py/refs/heads/main/logo.png" alt="Banner Image">
 </div>
 <style>
     .banner {
