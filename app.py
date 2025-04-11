@@ -35,10 +35,8 @@ SAFE_GLOBALS['np'] = np
 SAFE_GLOBALS.update(ALLOWED_NP_FUNCTIONS)
 
 # --- Helper Function Definitions ---
-
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
-    # (Same as previous working version)
     eq_string = eq_string.strip();
     if not eq_string: raise ValueError("Equation cannot be empty.")
     eq_string = eq_string.replace('^', '**') # Keep internal representation with **
@@ -50,7 +48,6 @@ def validate_and_parse_equation(eq_string):
     if not params: raise ValueError("No fit parameters (A-Z) found.")
     return eq_string, params # Return original string with potential '**'
 
-# Using the create_fit_function version confirmed to work previously
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
@@ -185,8 +182,27 @@ def format_equation_mathtext(eq_string_orig):
     return formatted_final
 
 
+#custom HTML for banner
+custom_html = """
+<div class="banner">
+    <img src="logo.png" alt="Banner Image">
+</div>
+<style>
+    .banner {
+        width: 160%;
+        height: 200px;
+        overflow: hidden;
+    }
+    .banner img {
+        width: 100%;
+        object-fit: cover;
+    }
+</style>
+"""
+
 # --- Main App Logic ---
-st.title("Physics Data Plotter and Fitter")
+st.components.v1.html(custom_html)
+#st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
 # --- Session State Initialization ---
