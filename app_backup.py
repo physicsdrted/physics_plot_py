@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,10 +12,14 @@ from scipy.optimize import curve_fit
 from matplotlib.gridspec import GridSpec
 
 # --- Configuration ---
-st.set_page_config(page_title="Physics Plot Fitter", layout="wide")
+st.set_page_config(page_title="Physics Plot", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
+# tell MatPlotLib to use larger fonts for the title and axis labels
+plt.rcParams['axes.labelsize'] = 16
+plt.rcParams['axes.titlesize'] = 20
+
 
 # --- Allowed characters and functions ---
 ALLOWED_CHARS = r"^[A-Za-z0-9\s\.\+\-\*\/\(\)\,\_\^]+$"
@@ -33,10 +36,8 @@ SAFE_GLOBALS['np'] = np
 SAFE_GLOBALS.update(ALLOWED_NP_FUNCTIONS)
 
 # --- Helper Function Definitions ---
-
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
-    # (Same as previous working version)
     eq_string = eq_string.strip();
     if not eq_string: raise ValueError("Equation cannot be empty.")
     eq_string = eq_string.replace('^', '**') # Keep internal representation with **
@@ -48,7 +49,6 @@ def validate_and_parse_equation(eq_string):
     if not params: raise ValueError("No fit parameters (A-Z) found.")
     return eq_string, params # Return original string with potential '**'
 
-# Using the create_fit_function version confirmed to work previously
 def create_fit_function(eq_string, params):
     """Dynamically creates Python function from validated equation string."""
     func_name = "dynamic_fit_func"; param_str = ', '.join(params)
@@ -183,9 +183,51 @@ def format_equation_mathtext(eq_string_orig):
     return formatted_final
 
 
+#custom HTML for banner
+custom_html = """
+<div class="banner">
+    <img src="https://raw.githubusercontent.com/physicsdrted/physics_plot_py/refs/heads/main/logo.png" alt="Banner Image">
+</div>
+<style>
+    .banner {
+        width: 100%;
+        height: 300px;
+        overflow: visible;
+    }
+    .banner img {
+        width: auto;
+        height: 50%;
+        object-fit: contain;
+    }
+</style>
+"""
+
 # --- Main App Logic ---
-st.title("Physics Data Plotter and Fitter")
+st.components.v1.html(custom_html)
+#st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
+
+@st.cache_data
+def get_data():
+    df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
+                   columns=['height (m)', ' ', 'time (s)' ,' '])
+    return df
+
+@st.cache_data
+def convert_for_download(df):
+    return df.to_csv(index=False).encode("utf-8")
+
+df = get_data()
+csv = convert_for_download(df)
+
+st.download_button(
+    label="Download Example CSV",
+    data=csv,
+    file_name="data.csv",
+    mime="text/csv",
+    icon=":material/download:",
+)
+
 
 # --- Session State Initialization ---
 if 'data_loaded' not in st.session_state:
@@ -313,7 +355,7 @@ if st.session_state.data_loaded:
                     chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
                     if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
                     user_title_str = title_input.strip();
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with Final Fit"
+                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
                     st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, "plot_title": final_plot_title, "legend_label": legend_label_str } # Store formatted label
                     st.success("Fit completed successfully!")
 
@@ -328,7 +370,7 @@ if st.session_state.data_loaded:
                     ax0.grid(True, linestyle=':', alpha=0.6); ax0.tick_params(axis='x', labelbottom=False)
                     ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
                     ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-                    ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Final Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
+                    ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
                     fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
 
                     st.rerun() # Rerun to display results
