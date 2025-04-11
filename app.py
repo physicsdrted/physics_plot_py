@@ -194,7 +194,7 @@ custom_html = """
     }
     .banner img {
         width: 100%;
-        object-fit: cover;
+        object-fit: contain;
     }
 </style>
 """
