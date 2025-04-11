@@ -209,8 +209,8 @@ st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from 
 
 @st.cache_data
 def get_data():
-    df = pd.DataFrame(
-        np.random.randn(10, 4), columns=("height (m)", " ", "time (s)", " ")
+    df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
+                   columns=['height (m)', ' ', 'time (s)' ,' '])
     )
     return df
 
@@ -222,7 +222,7 @@ df = get_data()
 csv = convert_for_download(df)
 
 st.download_button(
-    label="Download CSV",
+    label="Download Example CSV",
     data=csv,
     file_name="data.csv",
     mime="text/csv",
