@@ -210,7 +210,7 @@ st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from 
 @st.cache_data
 def get_data():
     df = pd.DataFrame(
-        np.random.randn(50, 20), columns=("col %d" % i for i in range(20))
+        np.random.randn(10, 4), columns=("height (m)", " ", "time (s)", " ")
     )
     return df
 
