@@ -279,7 +279,6 @@ if st.session_state.data_loaded:
         # --- Fitting Controls ---
         st.markdown("---"); st.subheader("Enter Fit Details")
 
- # <<< ADDED INSTRUCTIONS AND EXAMPLES >>>
         st.markdown("""
         **Instructions:**
         *   Use `x` for the independent variable.
@@ -306,96 +305,267 @@ if st.session_state.data_loaded:
 
         if fit_button and eq_string_input:
             st.session_state.final_fig = None
-            with st.spinner("Performing iterative fit... Please wait."):
+            with st.spinner("Validating equation..."):
                 try:
                     processed_eq_string, params = validate_and_parse_equation(eq_string_input)
-                    # <<< Format equation for legend >>>
-                    try:
-                         # Pass the version with '**' if validate_and_parse includes it
-                         legend_label_str = format_equation_mathtext(processed_eq_string)
-                         st.write(f"Formatted Legend Label: `{legend_label_str}`") # Debug
-                    except Exception as fmt_err:
-                         st.warning(f"Could not format equation for legend: {fmt_err}. Using raw string.")
-                         # Fallback label uses the processed string, replacing ** with ^ for display
-                         legend_label_str = f"Fit: y = {processed_eq_string.replace('**','^')}"
+                    legend_label_str = format_equation_mathtext(processed_eq_string)
+                    
+                    # --- NEW: Initial Guesses Input ---
+                    st.subheader("Initial Guesses")
+                    initial_guesses = {}
+                    cols = st.columns(len(params))
+                    for i, param in enumerate(params):
+                        with cols[i]:
+                            initial_guesses[param] = st.number_input(
+                                f"Initial guess for {param}",
+                                value=1.0,
+                                key=f"init_guess_{param}"
+                            )
+                    
+                    # --- NEW: Preview Plot ---
+                    st.subheader("Preview with Initial Guesses")
+                    fit_func = create_fit_function(processed_eq_string, params)
+                    x_preview = np.linspace(
+                        np.min(st.session_state.x_data),
+                        np.max(st.session_state.x_data),
+                        200
+                    )
+                    y_preview = fit_func(x_preview, *[initial_guesses[p] for p in params])
+                    
+                    fig_preview, ax_preview = plt.subplots(figsize=(10, 6))
+                    ax_preview.errorbar(
+                        st.session_state.x_data,
+                        st.session_state.y_data,
+                        yerr=st.session_state.y_err_safe,
+                        xerr=st.session_state.x_err_safe,
+                        fmt='o',
+                        label='Data'
+                    )
+                    ax_preview.plot(
+                        x_preview,
+                        y_preview,
+                        'r--',
+                        label='Initial Guess'
+                    )
+                    ax_preview.set_xlabel(st.session_state.x_axis_label)
+                    ax_preview.set_ylabel(st.session_state.y_axis_label)
+                    ax_preview.legend()
+                    st.pyplot(fig_preview)
+                    
+                    # --- NEW: Autofit Button ---
+                    if st.button("Autofit", key="autofit_button"):
+                        with st.spinner("Performing iterative fit... Please wait."):
+                            try:
+                                # --- Fit with User's Initial Guesses ---
+                                x_data = st.session_state.x_data
+                                y_data = st.session_state.y_data
+                                x_err_safe = st.session_state.x_err_safe
+                                y_err_safe = st.session_state.y_err_safe
+                                
+                                popt_current = [initial_guesses[p] for p in params]  # Start from user guesses
+                                pcov_current = None
+                                total_err_current = y_err_safe
+                                fit_successful = True
+                                
+                                # --- Original Iterative Fitting Loop (Now Uses User's p0) ---
+                                fit_progress_area = st.empty()
+                                for i in range(4):
+                                    fit_num = i + 1
+                                    fit_progress_area.info(f"Running Fit {fit_num}/4...")
+                                    sigma_to_use = total_err_current.copy()
+                                    
+                                    try:
+                                        popt_current, pcov_current = curve_fit(
+                                            fit_func,
+                                            x_data,
+                                            y_data,
+                                            sigma=sigma_to_use,
+                                            p0=popt_current if i > 0 else [initial_guesses[p] for p in params],
+                                            maxfev=5000 + i*2000
+                                        )
+                                    except Exception as fit_error:
+                                        st.error(f"Error during fit {fit_num}: {fit_error}")
+                                        fit_successful = False
+                                        break
+                                    
+                                    if i < 3 and fit_successful:
+                                        slopes = numerical_derivative(fit_func, x_data, popt_current)
+                                        total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
+                                        total_err_current = safeguard_errors(np.sqrt(total_err_sq))
+                                
+                                fit_progress_area.empty()
+                                
+                                if not fit_successful or popt_current is None:
+                                    st.error("Fit failed")
+                                    st.stop()
+                                
+                                popt_final = popt_current
+                                pcov_final = pcov_current
+                                total_err_final = sigma_to_use
+                                perr_final = np.sqrt(np.diag(pcov_final))
+                                residuals_final = y_data - fit_func(x_data, *popt_final)
+                                chi_squared = np.sum((residuals_final / total_err_final)**2)
+                                dof = len(y_data) - len(popt_final)
+                                chi_squared_err = np.nan
+                                chi_squared_red = np.nan
+                                red_chi_squared_err = np.nan
+                                if dof > 0:
+                                    chi_squared_err = np.sqrt(2.0 * dof)
+                                    chi_squared_red = chi_squared / dof
+                                    red_chi_squared_err = np.sqrt(2.0 / dof)
+                                
+                                user_title_str = title_input.strip()
+                                final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
+                                
+                                st.session_state.fit_results = {
+                                    "eq_string": processed_eq_string,
+                                    "params": params,
+                                    "popt": popt_final,
+                                    "perr": perr_final,
+                                    "chi2": chi_squared,
+                                    "chi2_err": chi_squared_err,
+                                    "dof": dof,
+                                    "red_chi2": chi_squared_red,
+                                    "red_chi2_err": red_chi_squared_err,
+                                    "total_err_final": total_err_final,
+                                    "residuals_final": residuals_final,
+                                    "plot_title": final_plot_title,
+                                    "legend_label": legend_label_str
+                                }
+                                
+                                # --- Generate Final Plot Figure ---
+                                fig = plt.figure(figsize=(10, 9.8))
+                                gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+                                ax0 = fig.add_subplot(gs[0])
+                                ax0.errorbar(
+                                    x_data,
+                                    y_data,
+                                    yerr=y_err_safe,
+                                    xerr=x_err_safe,
+                                    fmt='o',
+                                    markersize=4,
+                                    linestyle='None',
+                                    capsize=3,
+                                    label='Data',
+                                    zorder=5
+                                )
+                                x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
+                                y_fit_curve = fit_func(x_fit_curve, *popt_final)
+                                ax0.plot(
+                                    x_fit_curve,
+                                    y_fit_curve,
+                                    '-',
+                                    label=legend_label_str,
+                                    zorder=10,
+                                    linewidth=1.5
+                                )
+                                ax0.set_ylabel(st.session_state.y_axis_label)
+                                ax0.set_title(final_plot_title)
+                                ax0.legend(loc='best', fontsize='large')
+                                ax0.grid(True, linestyle=':', alpha=0.6)
+                                ax0.tick_params(axis='x', labelbottom=False)
+                                ax0.text(
+                                    0.5, 0.5,
+                                    'physicsplot.com',
+                                    transform=ax0.transAxes,
+                                    fontsize=40,
+                                    color='lightgrey',
+                                    alpha=0.4,
+                                    ha='center',
+                                    va='center',
+                                    rotation=30,
+                                    zorder=0
+                                )
+                                
+                                ax1 = fig.add_subplot(gs[1], sharex=ax0)
+                                ax1.errorbar(
+                                    x_data,
+                                    residuals_final,
+                                    yerr=total_err_final,
+                                    fmt='o',
+                                    markersize=4,
+                                    linestyle='None',
+                                    capsize=3,
+                                    zorder=5
+                                )
+                                ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
+                                ax1.set_xlabel(st.session_state.x_axis_label)
+                                ax1.set_ylabel("Residuals\n(Data - Fit)")
+                                ax1.grid(True, linestyle=':', alpha=0.6)
+                                fig.tight_layout(pad=1.0)
+                                st.session_state.final_fig = fig
+                                
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Error during fitting: {e}")
+                                st.stop()
 
-                    st.write("Attempting to create fit function...")
-                    try:
-                        fit_func = create_fit_function(processed_eq_string, params) # Use the reverted version
-                        st.success("Fit function created successfully.")
-                    except (SyntaxError, RuntimeError, Exception) as create_err: st.error(f"Function creation failed: {create_err}"); import traceback; st.error(traceback.format_exc()); st.stop()
-
-                    # --- Data Setup & Iterative Fitting Loop ---
-                    x_data = st.session_state.x_data; y_data = st.session_state.y_data; x_err_safe = st.session_state.x_err_safe; y_err_safe = st.session_state.y_err_safe
-                    popt_current = None; pcov_current = None; total_err_current = y_err_safe; fit_successful = True
-                    fit_progress_area = st.empty()
-                    for i in range(4):
-                        fit_num = i + 1; fit_progress_area.info(f"Running Fit {fit_num}/4...")
-                        p0 = popt_current if i > 0 else None; sigma_to_use = total_err_current.copy()
-                        # No debug expander to reduce clutter
-                        try:
-                            if i == 0: # Use simplified call for Fit 1
-                                 popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=sigma_to_use, p0=p0, maxfev=5000 + i*2000)
-                            else: # Use full call for subsequent fits
-                                 popt_current, pcov_current = curve_fit(fit_func, x_data, y_data, sigma=sigma_to_use, absolute_sigma=True, p0=p0, maxfev=5000 + i*2000, bounds=(-np.inf, np.inf))
-                            if pcov_current is None or not np.all(np.isfinite(pcov_current)): st.warning(f"Fit {fit_num} cov matrix non-finite."); # Allow continue but warn
-                        except Exception as fit_error: st.error(f"Error during fit {fit_num}: {fit_error}"); fit_successful = False; break
-                        if i < 3 and fit_successful:
-                            slopes = numerical_derivative(fit_func, x_data, popt_current); total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2; total_err_current = safeguard_errors(np.sqrt(total_err_sq))
-                        elif not fit_successful: break
-                    fit_progress_area.empty()
-                    # Check validity *after* loop finishes or breaks
-                    if not fit_successful or popt_current is None or pcov_current is None or not np.all(np.isfinite(pcov_current)): st.error("Fit failed or produced invalid covariance."); st.stop()
-
-                    # --- Process Final Results ---
-                    popt_final = popt_current; pcov_final = pcov_current; total_err_final = sigma_to_use
-                    perr_final = np.sqrt(np.diag(pcov_final)); residuals_final = y_data - fit_func(x_data, *popt_final)
-                    chi_squared = np.sum((residuals_final / total_err_final)**2); dof = len(y_data) - len(popt_final)
-                    chi_squared_err = np.nan; chi_squared_red = np.nan; red_chi_squared_err = np.nan
-                    if dof > 0: chi_squared_err = np.sqrt(2.0 * dof); chi_squared_red = chi_squared / dof; red_chi_squared_err = np.sqrt(2.0 / dof)
-                    user_title_str = title_input.strip();
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
-                    st.session_state.fit_results = { "eq_string": processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final, "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red, "red_chi2_err": red_chi_squared_err, "total_err_final": total_err_final, "residuals_final": residuals_final, "plot_title": final_plot_title, "legend_label": legend_label_str } # Store formatted label
-                    st.success("Fit completed successfully!")
-
-                    # --- Generate Final Plot Figure --- *MODIFIED PLOT LABEL*
-                    fig = plt.figure(figsize=(10, 9.8)); gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-                    ax0 = fig.add_subplot(gs[0]); ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-                    x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200); y_fit_curve = fit_func(x_fit_curve, *popt_final)
-                    # <<< Use formatted legend_label_str >>>
-                    ax0.plot(x_fit_curve, y_fit_curve, '-', label=legend_label_str, zorder=10, linewidth=1.5);
-                    ax0.set_ylabel(st.session_state.y_axis_label); ax0.set_title(final_plot_title);
-                    ax0.legend(loc='best', fontsize='large'); # Increase legend font size
-                    ax0.grid(True, linestyle=':', alpha=0.6); ax0.tick_params(axis='x', labelbottom=False)
-                    ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
-                    ax1 = fig.add_subplot(gs[1], sharex=ax0); ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-                    ax1.axhline(0, color='grey', linestyle='--', linewidth=1); ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals\n(Data - Fit)"); ax1.grid(True, linestyle=':', alpha=0.6)
-                    fig.tight_layout(pad=1.0); st.session_state.final_fig = fig
-
-                    st.rerun() # Rerun to display results
-
-                # --- Outer error handling ---
-                except ValueError as e_setup: st.error(f"Input Error: {e_setup}")
-                except SyntaxError as e_setup: st.error(f"Syntax Error function compile?: {e_setup}")
-                except RuntimeError as e_setup: st.error(f"Runtime Error setup?: {e_setup}")
-                except Exception as e_setup: st.error(f"Unexpected error: {e_setup}"); import traceback; st.error(traceback.format_exc())
+                except ValueError as e_setup:
+                    st.error(f"Input Error: {e_setup}")
+                except SyntaxError as e_setup:
+                    st.error(f"Syntax Error function compile?: {e_setup}")
+                except RuntimeError as e_setup:
+                    st.error(f"Runtime Error setup?: {e_setup}")
+                except Exception as e_setup:
+                    st.error(f"Unexpected error: {e_setup}")
+                    import traceback
+                    st.error(traceback.format_exc())
 
     else: # If data is loaded AND results exist, display them
         # --- Display Results Section ---
-        st.markdown("---"); st.subheader("Fit Results")
-        if st.session_state.final_fig: st.pyplot(st.session_state.final_fig)
-        res = st.session_state.fit_results; table_rows = []
-        table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""}) # Show original equation string
-        for i, p_name in enumerate(res['params']): table_rows.append({"Category": f"Parameter: {p_name}", "Value": f"{res['popt'][i]:.5g}", "Uncertainty": f"{res['perr'][i]:.3g}"})
-        table_rows.append({"Category": "Chi-squared (χ²)", "Value": f"{res['chi2']:.4f}", "Uncertainty": f"{res['chi2_err']:.3f}" if res['dof'] > 0 else ""})
-        table_rows.append({"Category": "Degrees of Freedom (DoF)", "Value": f"{res['dof']}", "Uncertainty": ""})
-        table_rows.append({"Category": "Reduced χ²/DoF", "Value": f"{res['red_chi2']:.4f}" if res['dof'] > 0 else "N/A", "Uncertainty": f"{res['red_chi2_err']:.3f}" if res['dof'] > 0 else ""})
+        st.markdown("---")
+        st.subheader("Fit Results")
+        if st.session_state.final_fig:
+            st.pyplot(st.session_state.final_fig)
+        
+        res = st.session_state.fit_results
+        table_rows = []
+        table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""})
+        
+        for i, p_name in enumerate(res['params']):
+            table_rows.append({
+                "Category": f"Parameter: {p_name}",
+                "Value": f"{res['popt'][i]:.5g}",
+                "Uncertainty": f"{res['perr'][i]:.3g}"
+            })
+        
+        table_rows.append({
+            "Category": "Chi-squared (χ²)",
+            "Value": f"{res['chi2']:.4f}",
+            "Uncertainty": f"{res['chi2_err']:.3f}" if res['dof'] > 0 else ""
+        })
+        
+        table_rows.append({
+            "Category": "Degrees of Freedom (DoF)",
+            "Value": f"{res['dof']}",
+            "Uncertainty": ""
+        })
+        
+        table_rows.append({
+            "Category": "Reduced χ²/DoF",
+            "Value": f"{res['red_chi2']:.4f}" if res['dof'] > 0 else "N/A",
+            "Uncertainty": f"{res['red_chi2_err']:.3f}" if res['dof'] > 0 else ""
+        })
+        
         results_df = pd.DataFrame(table_rows)
         st.dataframe(results_df.set_index('Category'), use_container_width=True)
-        if st.session_state.final_fig: # Download button
-            plot_title_for_filename = res.get('plot_title', f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit"); fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"; fn += ".svg"
-            img_buffer = io.BytesIO(); st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1); img_buffer.seek(0)
-            st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml")
+        
+        if st.session_state.final_fig:
+            plot_title_for_filename = res.get('plot_title', f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit")
+            fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
+            fn += ".svg"
+            
+            img_buffer = io.BytesIO()
+            st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
+            img_buffer.seek(0)
+            
+            st.download_button(
+                label="Download Plot as SVG",
+                data=img_buffer,
+                file_name=fn,
+                mime="image/svg+xml"
+            )
 
 # --- Footer ---
 st.markdown("---")
