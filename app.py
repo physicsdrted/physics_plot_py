@@ -207,6 +207,15 @@ st.components.v1.html(custom_html)
 #st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
+st.download_button(
+    label="Download an example CSV",
+    data=csv,
+    file_name="data.csv",
+    mime="text/csv",
+    icon=":material/download:",
+)
+
+
 # --- Session State Initialization ---
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False; st.session_state.x_data = None; st.session_state.y_data = None; st.session_state.x_err_safe = None; st.session_state.y_err_safe = None; st.session_state.x_axis_label = "X"; st.session_state.y_axis_label = "Y"; st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.processed_file_key = None; st.session_state.df_head = None
