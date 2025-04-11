@@ -207,7 +207,7 @@ st.components.v1.html(custom_html)
 #st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
-with open("data.csv", "r") as examplefile:
+with open("https://raw.githubusercontent.com/physicsdrted/physics_plot_py/refs/heads/main/data.csv", "r") as examplefile:
     st.download_button(
         label="Download Example CSV",
         data=examplefile,
