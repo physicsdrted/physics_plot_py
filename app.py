@@ -695,7 +695,7 @@ if st.session_state.data_loaded:
 
 
                     user_title_str = st.session_state.plot_title_input.strip() # Retrieve from session state
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
+                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
 
                     # Store results in session state
                     st.session_state.fit_results = {
