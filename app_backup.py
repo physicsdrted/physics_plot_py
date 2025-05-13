@@ -190,12 +190,12 @@ custom_html = """
 <style>
     .banner {
         width: 100%;
-        height: 300px;
+        height: 200px;
         overflow: visible;
     }
     .banner img {
         width: auto;
-        height: 50%;
+        height: 70%;
         object-fit: contain;
     }
 </style>
@@ -209,7 +209,7 @@ st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from 
 @st.cache_data
 def get_data():
     df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
-                   columns=['height (m)', ' ', 'time (s)' ,' '])
+                   columns=['time (s)', ' ', 'height (m)' ,' '])
     return df
 
 @st.cache_data
@@ -259,33 +259,106 @@ uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uplo
 if uploaded_file is not None:
     current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
     if current_file_key != st.session_state.get('processed_file_key', None):
-        st.info(f"Processing uploaded file: {uploaded_file.name}")
-        st.session_state.data_loaded = False; st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.df_head = None
+        st.info(f"Processing new uploaded file: {uploaded_file.name}")
+
+        # --- !!! ADD RESET LOGIC HERE !!! ---
+        # Reset all fitting-related states before processing the new file's data
+        st.session_state.fit_results = None
+        st.session_state.final_fig = None
+        st.session_state.show_guess_stage = False
+        st.session_state.processed_eq_string = None
+        st.session_state.params = []
+        st.session_state.fit_func = None
+        st.session_state.legend_label_str = ""
+        st.session_state.plot_title_input = ""
+        st.session_state.last_eq_input = "" # Clear last equation attempt too
+
+        # Clear any previous initial guess values stored in session state
+        # This prevents carrying over guesses if parameter names are reused
+        keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+        for key in keys_to_remove:
+            del st.session_state[key]
+        # --- End Reset Logic ---
+
+        # --- Now, proceed with processing the new file ---
         try: # File processing logic
             raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
-            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4: st.error("Invalid file structure."); st.stop()
-            try: x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
-            except Exception: x_label = "X (Col 1)"; y_label = "Y (Col 3)"; st.warning("Could not read labels.")
+            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
+                st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
+                st.session_state.data_loaded = False # Ensure data isn't marked loaded
+                st.session_state.processed_file_key = None # Clear key as processing failed
+                st.stop() # Stop if structure is wrong
+
+            try:
+                x_label = str(raw_df.iloc[0, 0])
+                y_label = str(raw_df.iloc[0, 2])
+            except Exception:
+                x_label = "X (Col 1)"
+                y_label = "Y (Col 3)"
+                st.warning("Could not read labels from header row.")
+
             df = raw_df.iloc[1:].copy()
-            if df.empty or df.shape[1] != 4: st.error("No data rows or wrong cols."); st.stop()
-            df.columns = ['x', 'x_err', 'y', 'y_err']; converted_cols = {}; conversion_failed = False
+            if df.empty or df.shape[1] != 4:
+                st.error("No data rows found or incorrect number of columns (expected 4).")
+                st.session_state.data_loaded = False
+                st.session_state.processed_file_key = None
+                st.stop()
+
+            df.columns = ['x', 'x_err', 'y', 'y_err']
+            converted_cols = {}
+            conversion_failed = False
             for col in df.columns:
                 try:
                     numeric_col = pd.to_numeric(df[col], errors='coerce')
-                    if numeric_col.isnull().any(): first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2; st.error(f"Col '{col}' non-numeric near row {first_bad_index}."); conversion_failed = True; break
-                    else: converted_cols[col] = pd.to_numeric(df[col])
-                except Exception as e: st.error(f"Error converting col '{col}': {e}"); conversion_failed = True; break
-            if conversion_failed: st.stop()
+                    if numeric_col.isnull().any():
+                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2 # +2 for 0-based index and header row
+                        st.error(f"Column '{col}' contains non-numeric data near row {first_bad_index}. Please check your CSV.")
+                        conversion_failed = True
+                        break
+                    else:
+                        converted_cols[col] = numeric_col # Use the already converted Series
+                except Exception as e:
+                    st.error(f"Error converting column '{col}': {e}")
+                    conversion_failed = True
+                    break
+
+            if conversion_failed:
+                st.session_state.data_loaded = False
+                st.session_state.processed_file_key = None
+                st.stop() # Stop if conversion fails
+
+            # If all conversions successful
             df = pd.DataFrame(converted_cols)
-            st.session_state.x_data = df['x'].to_numpy(); st.session_state.y_data = df['y'].to_numpy()
+
+            # --- Store Processed Data in Session State ---
+            st.session_state.x_data = df['x'].to_numpy()
+            st.session_state.y_data = df['y'].to_numpy()
+            # Ensure errors are non-negative before safeguarding
             st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
-            st.session_state.y_err_safe = safeguard_errors(df['y_err'].to_numpy())
-            st.session_state.x_axis_label = x_label; st.session_state.y_axis_label = y_label
+            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy())) # Y errors usually shouldn't be abs()'d unless specifically needed
+            st.session_state.x_axis_label = x_label
+            st.session_state.y_axis_label = y_label
             st.session_state.df_head = df.head(10)
-            st.session_state.data_loaded = True; st.session_state.processed_file_key = current_file_key
-            st.success("Data loaded!")
-        except pd.errors.ParserError as pe: st.error(f"CSV Parsing Error: {pe}."); st.stop()
-        except Exception as e: st.error(f"Error processing file: {e}"); st.stop()
+
+            # --- Mark as Loaded and Update Key ---
+            st.session_state.data_loaded = True
+            st.session_state.processed_file_key = current_file_key
+            st.success("New data loaded successfully!")
+            # No st.rerun() needed here, file upload triggers it
+
+        except pd.errors.ParserError as pe:
+            st.error(f"CSV Parsing Error: {pe}. Check file format and delimiters.")
+            st.session_state.data_loaded = False
+            st.session_state.processed_file_key = None
+            st.stop()
+        except Exception as e:
+            st.error(f"An unexpected error occurred while processing the file: {e}")
+            import traceback
+            st.error(traceback.format_exc()) # Show full traceback for debugging
+            st.session_state.data_loaded = False
+            st.session_state.processed_file_key = None
+            st.stop()
+# --- End of File Uploader Block ---
 
 # --- Display Data Preview and Initial Plot if data loaded ---
 if st.session_state.data_loaded:
@@ -622,7 +695,7 @@ if st.session_state.data_loaded:
 
 
                     user_title_str = st.session_state.plot_title_input.strip() # Retrieve from session state
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} with fit."
+                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
 
                     # Store results in session state
                     st.session_state.fit_results = {
