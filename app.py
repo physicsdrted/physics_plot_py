@@ -889,4 +889,5 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
+st.caption("Updated 5/20/2025")
 # st.caption("Watermark 'physicsplot.com' added to the main plot.")
