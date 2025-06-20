@@ -456,7 +456,7 @@ if st.session_state.data_loaded:
         # ##################################################################
         # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
         # ##################################################################
-        st.subheader("Step 2: Initial Guesses & Preview")
+        st.subheader("Step 2: Manual Fit & Preview")
         st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
 
         # Retrieve from session state
@@ -476,7 +476,7 @@ if st.session_state.data_loaded:
                 if guess_key not in st.session_state:
                     st.session_state[guess_key] = 1.0
                 initial_guesses[param] = st.number_input(
-                    f"Guess for {param}",
+                    f"Parameter {param}",
                     value=st.session_state[guess_key],
                     key=guess_key,
                     step=0.1,
@@ -485,63 +485,73 @@ if st.session_state.data_loaded:
 
         # --- Preview Plot and Chi-squared ---
         st.markdown("---")
-        st.write("**Preview with Current Guesses:**")
+        st.write("**Preview with Current Parameter Values:**")
         try:
             current_guess_values = [initial_guesses[p] for p in params]
+            x_data = st.session_state.x_data
+            y_data = st.session_state.y_data
+            x_err_safe = st.session_state.x_err_safe
+            y_err_safe = st.session_state.y_err_safe
 
-            # --- Calculate Residuals and Chi-squared for the preview ---
-            y_guess_at_points = fit_func(st.session_state.x_data, *current_guess_values)
-            residuals_preview = st.session_state.y_data - y_guess_at_points
 
-            # Use y-error for preview chi-squared. The full iterative error is calculated later.
-            chi_squared_preview = np.sum((residuals_preview / st.session_state.y_err_safe)**2)
+            # --- Calculate Residuals and Chi-squared for the preview using the robust method ---
+            y_guess_at_points = fit_func(x_data, *current_guess_values)
+            residuals_preview = y_data - y_guess_at_points
+
+            # --- Robust Error Propagation for Preview ---
+            # 1. Calculate the slope of the manual fit curve at each data point
+            slopes_preview = numerical_derivative(fit_func, x_data, current_guess_values)
             
-            # Per request, use N (number of data points) as DoF for this preview
-            dof_preview = len(st.session_state.x_data)
+            # 2. Calculate the total uncertainty by adding y-err and propagated x-err in quadrature
+            total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
+            total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
+
+            # 3. Calculate Chi-squared using the total uncertainty
+            chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
+            
+            # 4. Calculate Degrees of Freedom correctly (N - k)
+            dof_preview = len(x_data) - len(params)
             red_chi_squared_preview = chi_squared_preview / dof_preview if dof_preview > 0 else np.inf
             
             # --- Display Preview Metrics ---
             metric_cols = st.columns(2)
-            metric_cols[0].metric("Preview Chi-squared (χ²)", f"{chi_squared_preview:.4f}")
+            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi_squared_preview:.4f}")
             metric_cols[1].metric(
-                "Preview Reduced χ²/DoF", 
+                "Manual Fit Reduced χ²/DoF", 
                 f"{red_chi_squared_preview:.4f}",
-                help=f"Calculated with simplified DoF = {dof_preview} (the number of data points). The final fit will use DoF = N - (num parameters)."
+                help=f"Calculated with Degrees of Freedom (DoF) = {dof_preview} (N_points - N_params)."
             )
 
-
             # --- Generate points for the smooth preview curve ---
-            x_min_data, x_max_data = np.min(st.session_state.x_data), np.max(st.session_state.x_data)
-            x_range = x_max_data - x_min_data
+            x_min_data, x_max_data = np.min(x_data), np.max(x_data)
             x_preview_curve = np.linspace(x_min_data, x_max_data, 200)
             y_preview_curve = fit_func(x_preview_curve, *current_guess_values)
 
             # --- Create a two-panel plot (main + residuals) ---
-            fig_preview = plt.figure(figsize=(10, 8)) # Taller figure for 2 plots
+            fig_preview = plt.figure(figsize=(10, 8))
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             
             # Top plot (Data vs Guess)
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
             ax0_preview.errorbar(
-                st.session_state.x_data, st.session_state.y_data,
-                yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe,
+                x_data, y_data, yerr=y_err_safe, xerr=x_err_safe,
                 fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5
             )
             ax0_preview.plot(
                 x_preview_curve, y_preview_curve, 'r--',
-                label='Initial Guess Curve', zorder=10
+                label='Manual Fit Curve', zorder=10
             )
             ax0_preview.set_ylabel(st.session_state.y_axis_label)
-            ax0_preview.set_title("Data vs. Initial Guess")
+            ax0_preview.set_title("Data vs. Manual Fit")
             ax0_preview.legend()
             ax0_preview.grid(True, linestyle=':', alpha=0.7)
-            ax0_preview.tick_params(axis='x', labelbottom=False) # Hide x-axis labels on top plot
+            ax0_preview.tick_params(axis='x', labelbottom=False)
 
             # Bottom plot (Residuals)
             ax1_preview = fig_preview.add_subplot(gs_preview[1], sharex=ax0_preview)
+            # Use the robust total error for the residual error bars
             ax1_preview.errorbar(
-                st.session_state.x_data, residuals_preview,
-                yerr=st.session_state.y_err_safe, # Show y_err on residuals
+                x_data, residuals_preview, yerr=total_err_preview_safe,
                 fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5
             )
             ax1_preview.axhline(0, color='grey', linestyle='--', linewidth=1)
@@ -554,13 +564,14 @@ if st.session_state.data_loaded:
             plt.close(fig_preview)
 
         except Exception as preview_err:
-            st.warning(f"Could not generate preview plot or stats: {preview_err}. Check guesses and equation.")
+            st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
 
         # ##################################################################
         # ############### END OF MODIFIED CODE BLOCK #######################
         # ##################################################################
         st.markdown("---")
         # --- Autofit Button ---
+        st.write("If you are satisfied with this as an initial guess, proceed to the automatic fit.")
         autofit_button = st.button("Perform Autofit", key="autofit_button")
 
         if autofit_button:
