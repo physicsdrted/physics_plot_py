@@ -499,17 +499,10 @@ if st.session_state.data_loaded:
             residuals_preview = y_data - y_guess_at_points
 
             # --- Robust Error Propagation for Preview ---
-            # 1. Calculate the slope of the manual fit curve at each data point
             slopes_preview = numerical_derivative(fit_func, x_data, current_guess_values)
-            
-            # 2. Calculate the total uncertainty by adding y-err and propagated x-err in quadrature
             total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
             total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
-
-            # 3. Calculate Chi-squared using the total uncertainty
             chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
-            
-            # 4. Calculate Degrees of Freedom correctly (N - k)
             dof_preview = len(x_data) - len(params)
             red_chi_squared_preview = chi_squared_preview / dof_preview if dof_preview > 0 else np.inf
             
@@ -531,7 +524,6 @@ if st.session_state.data_loaded:
             fig_preview = plt.figure(figsize=(10, 8))
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             
-            # Top plot (Data vs Guess)
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
             ax0_preview.errorbar(
                 x_data, y_data, yerr=y_err_safe, xerr=x_err_safe,
@@ -547,9 +539,7 @@ if st.session_state.data_loaded:
             ax0_preview.grid(True, linestyle=':', alpha=0.7)
             ax0_preview.tick_params(axis='x', labelbottom=False)
 
-            # Bottom plot (Residuals)
             ax1_preview = fig_preview.add_subplot(gs_preview[1], sharex=ax0_preview)
-            # Use the robust total error for the residual error bars
             ax1_preview.errorbar(
                 x_data, residuals_preview, yerr=total_err_preview_safe,
                 fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5
@@ -566,13 +556,33 @@ if st.session_state.data_loaded:
         except Exception as preview_err:
             st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
 
+        st.markdown("---")
+        st.write("If this manual fit is unsatisfactory, you can start over. If it serves as a good initial guess, proceed to the automatic fit.")
+        
+        # --- Action Buttons ---
+        b_col1, b_col2 = st.columns(2)
+        
+        with b_col1:
+            if st.button("Define New Fit", key="redefine_fit_button"):
+                # Clear relevant state variables to go back to Stage 1
+                st.session_state.show_guess_stage = False
+                st.session_state.fit_results = None
+                st.session_state.final_fig = None
+                st.session_state.processed_eq_string = None
+                st.session_state.params = []
+                st.session_state.fit_func = None
+                # Clear guess keys to avoid carrying over old values
+                for key in list(st.session_state.keys()):
+                     if key.startswith("init_guess_"):
+                         del st.session_state[key]
+                st.rerun()
+
+        with b_col2:
+            autofit_button = st.button("Perform Autofit", key="autofit_button")
+        
         # ##################################################################
         # ############### END OF MODIFIED CODE BLOCK #######################
         # ##################################################################
-        st.markdown("---")
-        # --- Autofit Button ---
-        st.write("If you are satisfied with this as an initial guess, proceed to the automatic fit.")
-        autofit_button = st.button("Perform Autofit", key="autofit_button")
 
         if autofit_button:
             # --- Stage 3: Perform Fit ---
@@ -862,9 +872,9 @@ if st.session_state.data_loaded:
             st.session_state.params = []
             st.session_state.fit_func = None
             # Maybe clear guess keys too?
-            # for key in list(st.session_state.keys()):
-            #      if key.startswith("init_guess_"):
-            #          del st.session_state[key]
+            for key in list(st.session_state.keys()):
+                 if key.startswith("init_guess_"):
+                     del st.session_state[key]
             st.rerun()
 
     else: # If data is loaded AND results exist, display them
