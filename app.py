@@ -453,9 +453,6 @@ if st.session_state.data_loaded:
 
     # --- Stage 2: Guess Input & Preview ---
     elif st.session_state.show_guess_stage and not st.session_state.fit_results:
-        # ##################################################################
-        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-        # ##################################################################
         st.subheader("Step 2: Manual Fit & Preview")
         st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
 
@@ -468,6 +465,9 @@ if st.session_state.data_loaded:
              st.session_state.show_guess_stage = False
              st.rerun()
 
+        # ##################################################################
+        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+        # ##################################################################
         initial_guesses = {}
         cols = st.columns(len(params))
         for i, param in enumerate(params):
@@ -475,13 +475,24 @@ if st.session_state.data_loaded:
                 guess_key = f"init_guess_{param}"
                 if guess_key not in st.session_state:
                     st.session_state[guess_key] = 1.0
+                
+                # --- Dynamic Format for Number Input ---
+                current_value = st.session_state[guess_key]
+                format_specifier = "%.3f"  # Default format for "normal" numbers
+                if current_value != 0:
+                    if abs(current_value) < 0.01 or abs(current_value) > 1000:
+                        format_specifier = "%.3e"  # Switch to scientific notation
+
                 initial_guesses[param] = st.number_input(
                     f"Parameter {param}",
                     value=st.session_state[guess_key],
                     key=guess_key,
-                    step=0.1,
-                    format="%.3f"
+                    step=None, # Better for scientific notation inputs
+                    format=format_specifier
                 )
+        # ##################################################################
+        # ############### END OF MODIFIED CODE BLOCK #######################
+        # ##################################################################
 
         # --- Preview Plot and Chi-squared ---
         st.markdown("---")
@@ -580,10 +591,6 @@ if st.session_state.data_loaded:
         with b_col2:
             autofit_button = st.button("Perform Autofit", key="autofit_button")
         
-        # ##################################################################
-        # ############### END OF MODIFIED CODE BLOCK #######################
-        # ##################################################################
-
         if autofit_button:
             # --- Stage 3: Perform Fit ---
             with st.spinner("Performing iterative fit... Please wait."):
