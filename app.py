@@ -468,7 +468,7 @@ if st.session_state.data_loaded:
         )
 
         # --- Button to Validate Equation and Move to Guess Stage ---
-        set_eq_button = st.button("Set Equation & Enter Guesses", key="set_equation_button")
+        set_eq_button = st.button("Set Equation & Enter Starting Values", key="set_equation_button")
 
         if set_eq_button and eq_string_input:
             st.session_state.last_eq_input = eq_string_input # Store for convenience
@@ -979,4 +979,3 @@ if st.session_state.data_loaded:
 # --- Footer ---
 st.markdown("---")
 st.caption("Updated 5/20/2025")
-# st.caption("Watermark 'physicsplot.com' added to the main plot.")
