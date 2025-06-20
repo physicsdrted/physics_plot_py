@@ -52,7 +52,7 @@ def format_value_uncertainty(value, uncertainty):
 
     # 1. Determine the engineering exponent (multiple of 3) for the uncertainty
     exponent_of_unc = np.floor(np.log10(abs(uncertainty)))
-    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))
+    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))-3   
 
     # 2. Scale the value and uncertainty by the chosen exponent
     scaler = 10**(-eng_exponent)
