@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -34,7 +35,51 @@ SAFE_GLOBALS = {'__builtins__': {}}
 SAFE_GLOBALS['np'] = np
 SAFE_GLOBALS.update(ALLOWED_NP_FUNCTIONS)
 
+# ##################################################################
+# ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+# ##################################################################
+
 # --- Helper Function Definitions ---
+def format_value_uncertainty(value, uncertainty):
+    """
+    Formats a value and its uncertainty into a standard scientific string:
+    (aaa.a ± bbb.b) × 10^nnn, following specific formatting rules.
+    """
+    if not np.isfinite(value) or not np.isfinite(uncertainty) or uncertainty <= 0:
+        # Fallback for invalid data: return value and uncertainty separately.
+        val_str = f"{value:.5g}" if np.isfinite(value) else "N/A"
+        unc_str = f"{uncertainty:.3g}" if np.isfinite(uncertainty) else "N/A"
+        return f"{val_str} ± {unc_str}"
+
+    # 1. Determine the engineering exponent (multiple of 3) for the uncertainty
+    exponent_of_unc = np.floor(np.log10(abs(uncertainty)))
+    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))+3   
+
+    # 2. Scale the value and uncertainty by the chosen exponent
+    scaler = 10**(-eng_exponent)
+    scaled_value = value * scaler
+    scaled_uncertainty = uncertainty * scaler
+
+    # 3. Determine the number of decimal places needed to show 3 significant
+    #    figures for the scaled uncertainty.
+    #    Formula: num_decimals = 2 - floor(log10(scaled_uncertainty))
+    log10_scaled_unc = np.floor(np.log10(abs(scaled_uncertainty)))
+    decimal_places = max(0, 2 - int(log10_scaled_unc))
+
+    # 4. Format the scaled numbers to the calculated number of decimal places
+    val_fmt = f"{scaled_value:.{decimal_places}f}"
+    unc_fmt = f"{scaled_uncertainty:.{decimal_places}f}"
+
+    # 5. Assemble the final mathtext string
+    if eng_exponent != 0:
+        return f"$({val_fmt} \\pm {unc_fmt}) \\times 10^{{{eng_exponent}}}$"
+    else:
+        return f"$({val_fmt} \\pm {unc_fmt})$"
+
+# ##################################################################
+# ############### END OF MODIFIED CODE BLOCK #######################
+# ##################################################################
+
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
     eq_string = eq_string.strip();
@@ -117,7 +162,7 @@ def safeguard_errors(err_array, min_err=1e-9):
 def format_equation_mathtext(eq_string_orig):
     """Attempts to format the equation string for Matplotlib's mathtext."""
     formatted = eq_string_orig
-    st.write(f"DEBUG: Initial format string: `{formatted}`") # Debug
+    # st.write(f"DEBUG: Initial format string: `{formatted}`") # Debug
 
     # Handle functions (use raw strings for replacement!)
     # Use \1, \2 etc for capture groups in replacement
@@ -143,7 +188,7 @@ def format_equation_mathtext(eq_string_orig):
     formatted = re.sub(r'np\.absolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\babsolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
 
-    st.write(f"DEBUG: After func replace: `{formatted}`") # Debug
+    # st.write(f"DEBUG: After func replace: `{formatted}`") # Debug
 
     # Handle pi AFTER functions
     formatted = formatted.replace('np.pi', r'\pi')
@@ -154,7 +199,7 @@ def format_equation_mathtext(eq_string_orig):
     formatted = formatted.replace('*', r'\cdot ')
     formatted = formatted.replace('/', r'/') # Keep simple slash
 
-    st.write(f"DEBUG: After ops replace: `{formatted}`") # Debug
+    # st.write(f"DEBUG: After ops replace: `{formatted}`") # Debug
 
     # Prepare for math mode: put variables/params in braces {}
     # Need to be careful not to replace inside already processed parts e.g. ^{...}
@@ -170,7 +215,7 @@ def format_equation_mathtext(eq_string_orig):
         st.warning(f"Regex warning during brace insertion: {e_re}. Using previous format.")
         # Fallback to formatted before brace insertion if regex fails
 
-    st.write(f"DEBUG: After brace insert: `{formatted_final}`") # Debug
+    # st.write(f"DEBUG: After brace insert: `{formatted_final}`") # Debug
 
     # Add $ signs and y =
     formatted_final = f'$y = {formatted_final}$'
@@ -178,7 +223,7 @@ def format_equation_mathtext(eq_string_orig):
     formatted_final = formatted_final.replace('$$', '$') # Remove double dollars
     formatted_final = re.sub(r'\s{2,}', ' ', formatted_final) # Condense multiple spaces
 
-    st.write(f"DEBUG: Final formatted string: `{formatted_final}`") # Debug
+    # st.write(f"DEBUG: Final formatted string: `{formatted_final}`") # Debug
     return formatted_final
 
 
@@ -424,7 +469,7 @@ if st.session_state.data_loaded:
         )
 
         # --- Button to Validate Equation and Move to Guess Stage ---
-        set_eq_button = st.button("Set Equation & Enter Guesses", key="set_equation_button")
+        set_eq_button = st.button("Set Equation & Enter Starting Values", key="set_equation_button")
 
         if set_eq_button and eq_string_input:
             st.session_state.last_eq_input = eq_string_input # Store for convenience
@@ -453,13 +498,12 @@ if st.session_state.data_loaded:
 
     # --- Stage 2: Guess Input & Preview ---
     elif st.session_state.show_guess_stage and not st.session_state.fit_results:
-        st.subheader("Step 2: Initial Guesses & Preview")
+        st.subheader("Step 2: Manual Fit & Preview")
         st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
 
         # Retrieve from session state
         params = st.session_state.params
         fit_func = st.session_state.fit_func
-        processed_eq_string = st.session_state.processed_eq_string
 
         if not params or fit_func is None:
              st.error("Error: Parameters or fit function not available. Please re-enter equation.")
@@ -470,75 +514,122 @@ if st.session_state.data_loaded:
         cols = st.columns(len(params))
         for i, param in enumerate(params):
             with cols[i]:
-                # Use a unique key and provide a default value (e.g., 1.0)
-                # Use session state to store the *last entered* guess value for persistence
                 guess_key = f"init_guess_{param}"
                 if guess_key not in st.session_state:
-                    st.session_state[guess_key] = 1.0 # Default initial guess
+                    st.session_state[guess_key] = 1.0
+                
+                # --- Dynamic Format for Number Input ---
+                current_value = st.session_state[guess_key]
+                format_specifier = "%.3f"  # Default format for "normal" numbers
+                if current_value != 0:
+                    if abs(current_value) < 0.01 or abs(current_value) > 1000:
+                        format_specifier = "%.3e"  # Switch to scientific notation
 
                 initial_guesses[param] = st.number_input(
-                    f"Guess for {param}",
-                    value=st.session_state[guess_key], # Use stored value
-                    key=guess_key, # Use the unique key
-                    step=0.1, # Optional: add step for easier adjustment
-                    format="%.3f" # Optional: format display
+                    f"Parameter {param}",
+                    value=st.session_state[guess_key],
+                    key=guess_key,
+                    step=None, # Better for scientific notation inputs
+                    format=format_specifier
                 )
 
-        # --- Preview Plot ---
+        # --- Preview Plot and Chi-squared ---
         st.markdown("---")
-        st.write("**Preview Plot with Current Guesses:**")
+        st.write("**Preview with Current Parameter Values:**")
         try:
-            # Generate points for the preview curve
-            x_min_data, x_max_data = np.min(st.session_state.x_data), np.max(st.session_state.x_data)
-            x_range = x_max_data - x_min_data
-            x_preview = np.linspace(
-                x_min_data - 0.05 * x_range, # Extend slightly for better visualization
-                x_max_data + 0.05 * x_range,
-                200
-            )
             current_guess_values = [initial_guesses[p] for p in params]
-            y_preview = fit_func(x_preview, *current_guess_values)
+            x_data = st.session_state.x_data
+            y_data = st.session_state.y_data
+            x_err_safe = st.session_state.x_err_safe
+            y_err_safe = st.session_state.y_err_safe
 
-            fig_preview, ax_preview = plt.subplots(figsize=(10, 6))
-            # Plot data
-            ax_preview.errorbar(
-                st.session_state.x_data,
-                st.session_state.y_data,
-                yerr=st.session_state.y_err_safe,
-                xerr=st.session_state.x_err_safe,
-                fmt='o', markersize=4,
-                linestyle='None', capsize=3,
-                label='Data', zorder=5
+
+            # --- Calculate Residuals and Chi-squared for the preview using the robust method ---
+            y_guess_at_points = fit_func(x_data, *current_guess_values)
+            residuals_preview = y_data - y_guess_at_points
+
+            # --- Robust Error Propagation for Preview ---
+            slopes_preview = numerical_derivative(fit_func, x_data, current_guess_values)
+            total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
+            total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
+            chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
+            dof_preview = len(x_data) - len(params)
+            red_chi_squared_preview = chi_squared_preview / dof_preview if dof_preview > 0 else np.inf
+            
+            # --- Display Preview Metrics ---
+            metric_cols = st.columns(2)
+            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi_squared_preview:.4f}")
+            metric_cols[1].metric(
+                "Manual Fit Reduced χ²/DoF", 
+                f"{red_chi_squared_preview:.4f}",
+                help=f"Calculated with Degrees of Freedom (DoF) = {dof_preview} (N_points - N_params)."
             )
-            # Plot guess curve
-            ax_preview.plot(
-                x_preview,
-                y_preview,
-                'r--', # Red dashed line for guess
-                label='Initial Guess Curve', zorder=10
+
+            # --- Generate points for the smooth preview curve ---
+            x_min_data, x_max_data = np.min(x_data), np.max(x_data)
+            x_preview_curve = np.linspace(x_min_data, x_max_data, 200)
+            y_preview_curve = fit_func(x_preview_curve, *current_guess_values)
+
+            # --- Create a two-panel plot (main + residuals) ---
+            fig_preview = plt.figure(figsize=(10, 8))
+            gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+            
+            ax0_preview = fig_preview.add_subplot(gs_preview[0])
+            ax0_preview.errorbar(
+                x_data, y_data, yerr=y_err_safe, xerr=x_err_safe,
+                fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5
             )
-            ax_preview.set_xlabel(st.session_state.x_axis_label)
-            ax_preview.set_ylabel(st.session_state.y_axis_label)
-            ax_preview.set_title("Data vs. Initial Guess")
-            ax_preview.legend()
-            ax_preview.grid(True, linestyle=':', alpha=0.7)
-            ax_preview.set_ylim(bottom=min(np.min(st.session_state.y_data)*0.9, np.min(y_preview)*0.9) if len(y_preview) > 0 and not np.isnan(y_preview).all() else None,
-                                top=max(np.max(st.session_state.y_data)*1.1, np.max(y_preview)*1.1) if len(y_preview) > 0 and not np.isnan(y_preview).all() else None) # Basic auto-scaling
-            plt.tight_layout()
+            ax0_preview.plot(
+                x_preview_curve, y_preview_curve, 'r--',
+                label='Manual Fit Curve', zorder=10
+            )
+            ax0_preview.set_ylabel(st.session_state.y_axis_label)
+            ax0_preview.set_title("Data vs. Manual Fit")
+            ax0_preview.legend()
+            ax0_preview.grid(True, linestyle=':', alpha=0.7)
+            ax0_preview.tick_params(axis='x', labelbottom=False)
+
+            ax1_preview = fig_preview.add_subplot(gs_preview[1], sharex=ax0_preview)
+            ax1_preview.errorbar(
+                x_data, residuals_preview, yerr=total_err_preview_safe,
+                fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5
+            )
+            ax1_preview.axhline(0, color='grey', linestyle='--', linewidth=1)
+            ax1_preview.set_xlabel(st.session_state.x_axis_label)
+            ax1_preview.set_ylabel("Residuals")
+            ax1_preview.grid(True, linestyle=':', alpha=0.6)
+            
+            fig_preview.tight_layout(pad=1.0)
             st.pyplot(fig_preview)
-            plt.close(fig_preview) # Close the figure
+            plt.close(fig_preview)
 
         except Exception as preview_err:
-            st.warning(f"Could not generate preview plot: {preview_err}. Check guesses and equation.")
-            # Optionally show traceback in debug mode
-            # import traceback
-            # st.error(traceback.format_exc())
-
+            st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
 
         st.markdown("---")
-        # --- Autofit Button ---
-        autofit_button = st.button("Perform Autofit", key="autofit_button")
+        st.write("If this manual fit is unsatisfactory, you can start over. If it serves as a good initial guess, proceed to the automatic fit.")
+        
+        # --- Action Buttons ---
+        b_col1, b_col2 = st.columns(2)
+        
+        with b_col1:
+            if st.button("Define New Fit", key="redefine_fit_button"):
+                # Clear relevant state variables to go back to Stage 1
+                st.session_state.show_guess_stage = False
+                st.session_state.fit_results = None
+                st.session_state.final_fig = None
+                st.session_state.processed_eq_string = None
+                st.session_state.params = []
+                st.session_state.fit_func = None
+                # Clear guess keys to avoid carrying over old values
+                for key in list(st.session_state.keys()):
+                     if key.startswith("init_guess_"):
+                         del st.session_state[key]
+                st.rerun()
 
+        with b_col2:
+            autofit_button = st.button("Perform Autofit", key="autofit_button")
+        
         if autofit_button:
             # --- Stage 3: Perform Fit ---
             with st.spinner("Performing iterative fit... Please wait."):
@@ -733,7 +824,7 @@ if st.session_state.data_loaded:
                     ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
                     ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
                     ax1.set_xlabel(st.session_state.x_axis_label)
-                    ax1.set_ylabel("Residuals\n(Data - Fit)")
+                    ax1.set_ylabel("Residuals")
                     ax1.grid(True, linestyle=':', alpha=0.6)
                     fig.tight_layout(pad=1.0)
                     st.session_state.final_fig = fig # Store the figure itself
@@ -753,6 +844,9 @@ if st.session_state.data_loaded:
 
     # --- Stage 4: Show Results ---
     elif st.session_state.fit_results:
+        # ##################################################################
+        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+        # ##################################################################
         st.subheader("Step 3: Fit Results")
         res = st.session_state.fit_results # Retrieve results
 
@@ -763,39 +857,35 @@ if st.session_state.data_loaded:
         else:
             st.warning("Final plot figure not found in session state.")
 
-        # Display Results Table
+        # --- Display Results Table using Markdown for proper rendering ---
+        st.markdown("##### Fit Statistics")
+        
+        # Build the table row by row
         table_rows = []
-        # Use the original equation string stored in results for display
-        table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""})
+        table_rows.append(("**Equation**", f"`y = {res['eq_string']}`"))
 
         for i, p_name in enumerate(res['params']):
-            table_rows.append({
-                "Category": f"Parameter: {p_name}",
-                "Value": f"{res['popt'][i]:.5g}" if np.isfinite(res['popt'][i]) else "NaN",
-                "Uncertainty": f"{res['perr'][i]:.3g}" if np.isfinite(res['perr'][i]) else "NaN"
-            })
+            formatted_string = format_value_uncertainty(res['popt'][i], res['perr'][i])
+            table_rows.append((f"**Parameter: {p_name}**", formatted_string))
+        
+        chi2_str = format_value_uncertainty(res['chi2'], res['chi2_err'])
+        table_rows.append(("**Chi-squared (χ²)**", chi2_str))
+        
+        table_rows.append(("**Degrees of Freedom (DoF)**", f"{res['dof']}"))
+        
+        red_chi2_str = format_value_uncertainty(res['red_chi2'], res['red_chi2_err'])
+        table_rows.append(("**Reduced χ²/DoF**", red_chi2_str))
 
-        table_rows.append({
-            "Category": "Chi-squared (χ²)",
-            "Value": f"{res['chi2']:.4f}" if np.isfinite(res['chi2']) else "N/A",
-            "Uncertainty": f"{res['chi2_err']:.3f}" if res['dof'] > 0 and np.isfinite(res['chi2_err']) else ""
-        })
-
-        table_rows.append({
-            "Category": "Degrees of Freedom (DoF)",
-            "Value": f"{res['dof']}",
-            "Uncertainty": ""
-        })
-
-        table_rows.append({
-            "Category": "Reduced χ²/DoF",
-            "Value": f"{res['red_chi2']:.4f}" if res['dof'] > 0 and np.isfinite(res['red_chi2']) else "N/A",
-            "Uncertainty": f"{res['red_chi2_err']:.3f}" if res['dof'] > 0 and np.isfinite(res['red_chi2_err']) else ""
-        })
-
-        results_df = pd.DataFrame(table_rows)
-        st.dataframe(results_df.set_index('Category'), use_container_width=True)
-
+        # Create the markdown table string
+        markdown_table = "| Category | Value |\n|---:|:---| \n"
+        for category, value in table_rows:
+            markdown_table += f"| {category} | {value} |\n"
+        
+        st.markdown(markdown_table)
+        # ##################################################################
+        # ############### END OF MODIFIED CODE BLOCK #######################
+        # ##################################################################
+        
         # Download Button
         if st.session_state.final_fig: # Check again just in case
             try:
@@ -827,9 +917,9 @@ if st.session_state.data_loaded:
             st.session_state.params = []
             st.session_state.fit_func = None
             # Maybe clear guess keys too?
-            # for key in list(st.session_state.keys()):
-            #      if key.startswith("init_guess_"):
-            #          del st.session_state[key]
+            for key in list(st.session_state.keys()):
+                 if key.startswith("init_guess_"):
+                     del st.session_state[key]
             st.rerun()
 
     else: # If data is loaded AND results exist, display them
@@ -889,4 +979,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Watermark 'physicsplot.com' added to the main plot.")
+st.caption("Updated 5/20/2025")
