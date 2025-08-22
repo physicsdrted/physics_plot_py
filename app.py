@@ -399,6 +399,7 @@ with tab1:
         current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
         if current_file_key != st.session_state.get('processed_file_key', None):
             st.info(f"Processing new uploaded file: {uploaded_file.name}")
+            # Full reset of application state
             st.session_state.fit_results = None
             st.session_state.final_fig = None
             st.session_state.show_guess_stage = False
@@ -461,57 +462,70 @@ with tab2:
         
         submitted = st.form_submit_button("Load Manual Data")
 
+    # ##################################################################
+    # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+    # ##################################################################
     if submitted:
         try:
+            # Step 1: Parse all data from text areas
             x_dat = parse_data_string(x_data_manual)
             y_dat = parse_data_string(y_data_manual)
             x_err = parse_data_string(x_err_manual)
             y_err = parse_data_string(y_err_manual)
             
+            # Step 2: Validate the parsed data
             if not x_dat or not y_dat:
                 st.error("X-Values and Y-Values cannot be empty."); st.stop()
 
-            # Handle single uncertainty values by broadcasting
+            # Handle single uncertainty values by broadcasting them to the full data length
             if len(x_err) == 1: x_err = [x_err[0]] * len(x_dat)
             if len(y_err) == 1: y_err = [y_err[0]] * len(y_dat)
 
+            # Check for consistent lengths
             if not (len(x_dat) == len(y_dat) == len(x_err) == len(y_err)):
                 st.error(f"Data length mismatch! X: {len(x_dat)}, Y: {len(y_dat)}, X_Err: {len(x_err)}, Y_Err: {len(y_err)}. All columns must have the same number of entries (a single uncertainty value is applied to all points).")
                 st.stop()
             
-            # This key ensures that if data changes, the fit is reset
-            manual_data_key = f"manual_{x_label_manual}_{y_label_manual}_{x_data_manual}_{x_err_manual}_{y_data_manual}_{y_err_manual}"
+            # Step 3: Data is valid. Unconditionally reset the application state.
+            st.info("Processing manual data...")
+            st.session_state.fit_results = None
+            st.session_state.final_fig = None
+            st.session_state.show_guess_stage = False
+            st.session_state.processed_eq_string = None
+            st.session_state.params = []
+            st.session_state.fit_func = None
+            st.session_state.legend_label_str = ""
+            st.session_state.plot_title_input = ""
+            st.session_state.last_eq_input = ""
+            keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
+
+            # Step 4: Load the new data into session_state
+            df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
+
+            st.session_state.x_data = df_manual['x'].to_numpy()
+            st.session_state.y_data = df_manual['y'].to_numpy()
+            st.session_state.x_err_safe = safeguard_errors(np.abs(df_manual['x_err'].to_numpy()))
+            st.session_state.y_err_safe = safeguard_errors(np.abs(df_manual['y_err'].to_numpy()))
+            st.session_state.x_axis_label = x_label_manual.strip() if x_label_manual.strip() else "X"
+            st.session_state.y_axis_label = y_label_manual.strip() if y_label_manual.strip() else "Y"
+            st.session_state.df_head = df_manual.head(10)
             
-            if manual_data_key != st.session_state.get('processed_file_key', None):
-                st.info("Processing new manual data...")
-                st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.show_guess_stage = False
-                st.session_state.processed_eq_string = None; st.session_state.params = []; st.session_state.fit_func = None
-                st.session_state.legend_label_str = ""; st.session_state.plot_title_input = ""; st.session_state.last_eq_input = ""
-                
-                # ##################################################################
-                # ############# BEGINNING OF CORRECTED CODE BLOCK ##################
-                # ##################################################################
-                keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-                for key in keys_to_remove:
-                    del st.session_state[key]
-                # ##################################################################
-                # ############### END OF CORRECTED CODE BLOCK ######################
-                # ##################################################################
-
-                df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
-
-                st.session_state.x_data = df_manual['x'].to_numpy(); st.session_state.y_data = df_manual['y'].to_numpy()
-                st.session_state.x_err_safe = safeguard_errors(np.abs(df_manual['x_err'].to_numpy())); st.session_state.y_err_safe = safeguard_errors(np.abs(df_manual['y_err'].to_numpy()))
-                st.session_state.x_axis_label = x_label_manual.strip() if x_label_manual.strip() else "X"; st.session_state.y_axis_label = y_label_manual.strip() if y_label_manual.strip() else "Y"
-                st.session_state.df_head = df_manual.head(10)
-                st.session_state.data_loaded = True; st.session_state.processed_file_key = manual_data_key
-                st.success("Manual data loaded successfully!")
-                st.rerun()
+            # Step 5: Set a new key and status, then rerun the app
+            manual_data_key = f"manual_{x_label_manual}_{y_label_manual}_{x_data_manual}_{x_err_manual}_{y_data_manual}_{y_err_manual}"
+            st.session_state.processed_file_key = manual_data_key
+            st.session_state.data_loaded = True
+            st.success("Manual data loaded successfully!")
+            st.rerun()
 
         except ValueError as e:
             st.error(f"Input Error: {e}")
         except Exception as e:
             st.error(f"An unexpected error occurred: {e}")
+    # ##################################################################
+    # ############### END OF MODIFIED CODE BLOCK #######################
+    # ##################################################################
 
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
