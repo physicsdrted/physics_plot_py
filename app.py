@@ -781,4 +781,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 5/20/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 8/22/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
