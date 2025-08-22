@@ -781,4 +781,5 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
+st.markdown("<a href = "https://physicsplot.shinyapps.io/PhysicsPlot20231011/">Old Version</a>")
 st.caption("Updated 8/22/2025")
