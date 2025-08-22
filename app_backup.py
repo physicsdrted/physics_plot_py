@@ -804,16 +804,48 @@ if st.session_state.data_loaded:
                         "legend_label": st.session_state.legend_label_str # Use stored label
                     }
 
+                    # ##################################################################
+                    # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+                    # ##################################################################
+
+                    # --- Build the legend labels in three parts ---
+                    # Part 1: Equation Label
+                    equation_label = st.session_state.legend_label_str
+
+                    # Part 2: Statistics Label (for the invisible plot element)
+                    stats_parts = []
+                    # Add Parameters
+                    for i, p_name in enumerate(params):
+                        param_str = format_value_uncertainty(popt_final[i], perr_final[i])
+                        # Format for the legend: P = (value ± unc), removing outer '$' from the helper
+                        stats_parts.append(f"${p_name} = {param_str.replace('$', '')}$")
+                    # Add Reduced Chi-squared
+                    red_chi2_str = format_value_uncertainty(chi_squared_red, red_chi_squared_err)
+                    # The mathtext for chi-squared is \chi^2
+                    stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
+                    # Join the stats parts with newlines
+                    stats_label = "\n".join(stats_parts)
+
+
                     # --- Generate Final Plot Figure ---
                     fig = plt.figure(figsize=(10, 9.8))
                     gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
                     ax0 = fig.add_subplot(gs[0])
-                    ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+
+                    # Plot 1: The fit curve, with only the equation as its label.
                     x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
                     y_fit_curve = fit_func(x_fit_curve, *popt_final)
-                    ax0.plot(x_fit_curve, y_fit_curve, '-', label=st.session_state.legend_label_str, zorder=10, linewidth=1.5)
+                    ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
+
+                    # Plot 2: The data points, with the label "Data".
+                    ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+
+                    # Plot 3: An INVISIBLE plot element that exists only to hold the statistics label in the legend.
+                    ax0.plot([], [], ' ', label=stats_label)
+
                     ax0.set_ylabel(st.session_state.y_axis_label)
                     ax0.set_title(final_plot_title)
+                    # The legend() call will now automatically create the three desired sections in the correct order.
                     ax0.legend(loc='best', fontsize='large')
                     ax0.grid(True, linestyle=':', alpha=0.6)
                     ax0.tick_params(axis='x', labelbottom=False)
@@ -827,6 +859,10 @@ if st.session_state.data_loaded:
                     ax1.grid(True, linestyle=':', alpha=0.6)
                     fig.tight_layout(pad=1.0)
                     st.session_state.final_fig = fig # Store the figure itself
+                    
+                    # ##################################################################
+                    # ############### END OF MODIFIED CODE BLOCK #######################
+                    # ##################################################################
 
                     # Clear the flag that shows the guess stage
                     st.session_state.show_guess_stage = False
@@ -863,17 +899,12 @@ if st.session_state.data_loaded:
         table_rows = []
         table_rows.append(("**Equation**", f"`y = {res['eq_string']}`"))
 
-        for i, p_name in enumerate(res['params']):
-            formatted_string = format_value_uncertainty(res['popt'][i], res['perr'][i])
-            table_rows.append((f"**Parameter: {p_name}**", formatted_string))
+        # Parameters and Reduced Chi-Squared are now in the plot legend.
         
         chi2_str = format_value_uncertainty(res['chi2'], res['chi2_err'])
         table_rows.append(("**Chi-squared (χ²)**", chi2_str))
         
         table_rows.append(("**Degrees of Freedom (DoF)**", f"{res['dof']}"))
-        
-        red_chi2_str = format_value_uncertainty(res['red_chi2'], res['red_chi2_err'])
-        table_rows.append(("**Reduced χ²/DoF**", red_chi2_str))
 
         # Create the markdown table string
         markdown_table = "| Category | Value |\n|---:|:---| \n"
