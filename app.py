@@ -34,10 +34,6 @@ SAFE_GLOBALS = {'__builtins__': {}}
 SAFE_GLOBALS['np'] = np
 SAFE_GLOBALS.update(ALLOWED_NP_FUNCTIONS)
 
-# ##################################################################
-# ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-# ##################################################################
-
 # --- Helper Function Definitions ---
 def format_value_uncertainty(value, uncertainty):
     """
@@ -74,10 +70,6 @@ def format_value_uncertainty(value, uncertainty):
         return f"$({val_fmt} \\pm {unc_fmt}) \\times 10^{{{eng_exponent}}}$"
     else:
         return f"$({val_fmt} \\pm {unc_fmt})$"
-
-# ##################################################################
-# ############### END OF MODIFIED CODE BLOCK #######################
-# ##################################################################
 
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
@@ -140,7 +132,6 @@ def {func_name}(x, {param_str}):
 
 def numerical_derivative(func, x, params, h=1e-7):
     """Calculates numerical derivative using central difference."""
-    # (Same as before)
     try:
         if params is None or not all(np.isfinite(p) for p in params): st.warning("Invalid params to num_deriv."); return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
         y_plus_h = func(x + h, *params); y_minus_h = func(x - h, *params); deriv = (y_plus_h - y_minus_h) / (2 * h)
@@ -151,20 +142,14 @@ def numerical_derivative(func, x, params, h=1e-7):
 
 def safeguard_errors(err_array, min_err=1e-9):
      """Replaces non-positive or NaN/Inf errors with a small positive number."""
-     # (Same as before)
      safe_err = np.array(err_array, dtype=float); invalid_mask = ~np.isfinite(safe_err) | (safe_err <= 0)
      num_invalid = np.sum(invalid_mask)
      if num_invalid > 0: st.warning(f"Found {num_invalid} invalid values in error array. Replacing with {min_err}."); safe_err[invalid_mask] = min_err
      return safe_err
 
-# <<< NEW Function to Format Equation for Mathtext >>>
 def format_equation_mathtext(eq_string_orig):
     """Attempts to format the equation string for Matplotlib's mathtext."""
     formatted = eq_string_orig
-    # st.write(f"DEBUG: Initial format string: `{formatted}`") # Debug
-
-    # Handle functions (use raw strings for replacement!)
-    # Use \1, \2 etc for capture groups in replacement
     formatted = re.sub(r'np\.exp\((.*?)\)', r'e^{\1}', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\bexp\((.*?)\)', r'e^{\1}', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'np\.sqrt\((.*?)\)', r'\\sqrt{\1}', formatted, flags=re.IGNORECASE)
@@ -177,58 +162,30 @@ def format_equation_mathtext(eq_string_orig):
     formatted = re.sub(r'\btan\((.*?)\)', r'\\mathrm{tan}(\\1)', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'np\.log10\((.*?)\)', r'\\log_{10}(\1)', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\blog10\((.*?)\)', r'\\log_{10}(\1)', formatted, flags=re.IGNORECASE)
-    formatted = re.sub(r'np\.ln\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE) # Keep extra \ for ln? Test this.
+    formatted = re.sub(r'np\.ln\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\bln\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'np\.log\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\blog\((.*?)\)', r'\\ln(\\1)', formatted, flags=re.IGNORECASE)
-    # Add more functions as needed (e.g., abs)
     formatted = re.sub(r'np\.abs\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\babs\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'np\.absolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
     formatted = re.sub(r'\babsolute\((.*?)\)', r'|{\1}|', formatted, flags=re.IGNORECASE)
-
-    # st.write(f"DEBUG: After func replace: `{formatted}`") # Debug
-
-    # Handle pi AFTER functions
     formatted = formatted.replace('np.pi', r'\pi')
     formatted = formatted.replace('pi', r'\pi')
-
-    # Handle operators and powers
     formatted = formatted.replace('**', '^')
     formatted = formatted.replace('*', r'\cdot ')
-    formatted = formatted.replace('/', r'/') # Keep simple slash
-
-    # st.write(f"DEBUG: After ops replace: `{formatted}`") # Debug
-
-    # Prepare for math mode: put variables/params in braces {}
-    # Need to be careful not to replace inside already processed parts e.g. ^{...}
-    # Using placeholders might be safer but more complex. Let's try direct replacement first.
+    formatted = formatted.replace('/', r'/')
     formatted_final = formatted
     try:
-        # Replace single uppercase letters ONLY if not preceded/followed by alphanumeric or _ or { or }
-        # This avoids replacing 'A' in 'Abs' or '{A}'
         formatted_final = re.sub(r'(?<![a-zA-Z0-9_{])([A-Z])(?![a-zA-Z0-9_}])', r'{\1}', formatted_final)
-        # Replace 'x' ONLY if not preceded/followed by alphanumeric or _ or { or }
         formatted_final = re.sub(r'(?<![a-zA-Z0-9_{])(x)(?![a-zA-Z0-9_}])', r'{x}', formatted_final)
     except Exception as e_re:
         st.warning(f"Regex warning during brace insertion: {e_re}. Using previous format.")
-        # Fallback to formatted before brace insertion if regex fails
-
-    # st.write(f"DEBUG: After brace insert: `{formatted_final}`") # Debug
-
-    # Add $ signs and y =
     formatted_final = f'$y = {formatted_final}$'
-    # Simple cleanup
-    formatted_final = formatted_final.replace('$$', '$') # Remove double dollars
-    formatted_final = re.sub(r'\s{2,}', ' ', formatted_final) # Condense multiple spaces
-
-    # st.write(f"DEBUG: Final formatted string: `{formatted_final}`") # Debug
+    formatted_final = formatted_final.replace('$$', '$')
+    formatted_final = re.sub(r'\s{2,}', ' ', formatted_final)
     return formatted_final
 
-
-# ##################################################################
-# ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-# ##################################################################
 def perform_the_autofit(initial_guesses):
     """
     Takes a list of initial guesses, performs the iterative curve fit,
@@ -237,7 +194,6 @@ def perform_the_autofit(initial_guesses):
     """
     try:
         with st.spinner("Performing iterative fit... Please wait."):
-            # --- Retrieve data and functions from session state ---
             fit_func = st.session_state.fit_func
             params = st.session_state.params
             x_data = st.session_state.x_data
@@ -248,9 +204,7 @@ def perform_the_autofit(initial_guesses):
             popt_current = list(initial_guesses)
             pcov_current = None
             total_err_current = y_err_safe.copy()
-            fit_successful_internal = True
 
-            # --- Iterative Fitting Loop ---
             max_iterations = 4
             for i in range(max_iterations):
                 sigma_to_use = total_err_current.copy()
@@ -271,10 +225,8 @@ def perform_the_autofit(initial_guesses):
                         if pcov_current is None: pcov_current = np.full((len(params), len(params)), np.inf)
 
                 except RuntimeError as fit_error:
-                    # This is the most common failure point for bad initial guesses
                     raise RuntimeError(f"Fit failed to converge: {fit_error}") from fit_error
 
-                # Update errors for the next iteration
                 if i < max_iterations - 1:
                     slopes = numerical_derivative(fit_func, x_data, popt_current)
                     if np.all(np.isfinite(slopes)):
@@ -283,14 +235,11 @@ def perform_the_autofit(initial_guesses):
                     else:
                         total_err_current = y_err_safe.copy()
 
-            # --- Fit Succeeded: Process and Store Results ---
             popt_final = popt_current
             pcov_final = pcov_current
             total_err_final = sigma_to_use if sigma_to_use is not None else np.ones_like(y_data)
-
             diag_pcov = np.diag(pcov_final)
             perr_final = np.sqrt(diag_pcov) if not np.any(diag_pcov < 0) else np.full(len(popt_final), np.nan)
-
             residuals_final = y_data - fit_func(x_data, *popt_final)
             dof = len(y_data) - len(popt_final)
             if dof > 0:
@@ -301,17 +250,13 @@ def perform_the_autofit(initial_guesses):
             else:
                 chi_squared, chi_squared_err, chi_squared_red, red_chi_squared_err = np.nan, np.nan, np.nan, np.nan
             
-            # --- Store all results in session state ---
             st.session_state.fit_results = {
                 "eq_string": st.session_state.processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final,
                 "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red,
-                "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final
+                "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final, "total_err_final": total_err_final
             }
             
-            # --- Generate the Final Plot Figure ---
-            # Part 1: Equation Label
             equation_label = st.session_state.legend_label_str
-            # Part 2: Statistics Label
             stats_parts = []
             for i, p_name in enumerate(params):
                 param_str = format_value_uncertainty(popt_final[i], perr_final[i])
@@ -330,7 +275,7 @@ def perform_the_autofit(initial_guesses):
             ax0.plot([], [], ' ', label=stats_label)
             
             user_title_str = st.session_state.plot_title_input.strip()
-            final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
+            final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
             ax0.set_ylabel(st.session_state.y_axis_label)
             ax0.set_title(final_plot_title)
             ax0.legend(loc='best', fontsize='large')
@@ -347,17 +292,13 @@ def perform_the_autofit(initial_guesses):
             fig.tight_layout(pad=1.0)
             st.session_state.final_fig = fig
             
-            return True # Success
+            return True
 
     except Exception as e:
         st.error(f"Error during fitting process: {e}")
         st.session_state.fit_results = None
         st.session_state.final_fig = None
-        return False # Failure
-
-# ##################################################################
-# ############### END OF MODIFIED CODE BLOCK #######################
-# ##################################################################
+        return False
 
 #custom HTML for banner
 custom_html = """
@@ -380,7 +321,6 @@ custom_html = """
 
 # --- Main App Logic ---
 st.components.v1.html(custom_html)
-#st.title("Physics Data Plotter and Fitter")
 st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
 @st.cache_data
@@ -404,7 +344,6 @@ st.download_button(
     icon=":material/download:",
 )
 
-# --- Session State Initialization (Add new variables) ---
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
     st.session_state.x_data = None
@@ -417,7 +356,6 @@ if 'data_loaded' not in st.session_state:
     st.session_state.final_fig = None
     st.session_state.processed_file_key = None
     st.session_state.df_head = None
-# --- New State Variables ---
 if 'show_guess_stage' not in st.session_state:
     st.session_state.show_guess_stage = False
 if 'processed_eq_string' not in st.session_state:
@@ -428,18 +366,14 @@ if 'fit_func' not in st.session_state:
     st.session_state.fit_func = None
 if 'legend_label_str' not in st.session_state:
     st.session_state.legend_label_str = ""
-if 'plot_title_input' not in st.session_state: # Store title input too
+if 'plot_title_input' not in st.session_state:
     st.session_state.plot_title_input = ""
 
-# --- File Uploader ---
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
 if uploaded_file is not None:
     current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
     if current_file_key != st.session_state.get('processed_file_key', None):
         st.info(f"Processing new uploaded file: {uploaded_file.name}")
-
-        # --- !!! ADD RESET LOGIC HERE !!! ---
-        # Reset all fitting-related states before processing the new file's data
         st.session_state.fit_results = None
         st.session_state.final_fig = None
         st.session_state.show_guess_stage = False
@@ -448,23 +382,18 @@ if uploaded_file is not None:
         st.session_state.fit_func = None
         st.session_state.legend_label_str = ""
         st.session_state.plot_title_input = ""
-        st.session_state.last_eq_input = "" # Clear last equation attempt too
-
-        # Clear any previous initial guess values stored in session state
-        # This prevents carrying over guesses if parameter names are reused
+        st.session_state.last_eq_input = ""
         keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
         for key in keys_to_remove:
             del st.session_state[key]
-        # --- End Reset Logic ---
 
-        # --- Now, proceed with processing the new file ---
-        try: # File processing logic
+        try:
             raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
             if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
                 st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
-                st.session_state.data_loaded = False # Ensure data isn't marked loaded
-                st.session_state.processed_file_key = None # Clear key as processing failed
-                st.stop() # Stop if structure is wrong
+                st.session_state.data_loaded = False
+                st.session_state.processed_file_key = None
+                st.stop()
 
             try:
                 x_label = str(raw_df.iloc[0, 0])
@@ -488,12 +417,12 @@ if uploaded_file is not None:
                 try:
                     numeric_col = pd.to_numeric(df[col], errors='coerce')
                     if numeric_col.isnull().any():
-                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2 # +2 for 0-based index and header row
+                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2
                         st.error(f"Column '{col}' contains non-numeric data near row {first_bad_index}. Please check your CSV.")
                         conversion_failed = True
                         break
                     else:
-                        converted_cols[col] = numeric_col # Use the already converted Series
+                        converted_cols[col] = numeric_col
                 except Exception as e:
                     st.error(f"Error converting column '{col}': {e}")
                     conversion_failed = True
@@ -502,26 +431,21 @@ if uploaded_file is not None:
             if conversion_failed:
                 st.session_state.data_loaded = False
                 st.session_state.processed_file_key = None
-                st.stop() # Stop if conversion fails
+                st.stop()
 
-            # If all conversions successful
             df = pd.DataFrame(converted_cols)
 
-            # --- Store Processed Data in Session State ---
             st.session_state.x_data = df['x'].to_numpy()
             st.session_state.y_data = df['y'].to_numpy()
-            # Ensure errors are non-negative before safeguarding
             st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
-            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy())) # Y errors usually shouldn't be abs()'d unless specifically needed
+            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
             st.session_state.x_axis_label = x_label
             st.session_state.y_axis_label = y_label
             st.session_state.df_head = df.head(10)
 
-            # --- Mark as Loaded and Update Key ---
             st.session_state.data_loaded = True
             st.session_state.processed_file_key = current_file_key
             st.success("New data loaded successfully!")
-            # No st.rerun() needed here, file upload triggers it
 
         except pd.errors.ParserError as pe:
             st.error(f"CSV Parsing Error: {pe}. Check file format and delimiters.")
@@ -531,13 +455,11 @@ if uploaded_file is not None:
         except Exception as e:
             st.error(f"An unexpected error occurred while processing the file: {e}")
             import traceback
-            st.error(traceback.format_exc()) # Show full traceback for debugging
+            st.error(traceback.format_exc())
             st.session_state.data_loaded = False
             st.session_state.processed_file_key = None
             st.stop()
-# --- End of File Uploader Block ---
 
-# --- Display Data Preview and Initial Plot if data loaded ---
 if st.session_state.data_loaded:
     if st.session_state.df_head is not None:
         st.markdown("---")
@@ -556,62 +478,33 @@ if st.session_state.data_loaded:
         ax_initial.legend()
         plt.tight_layout()
         st.pyplot(fig_initial)
-        plt.close(fig_initial) # Close the figure to free memory
+        plt.close(fig_initial)
     except Exception as plot_err:
         st.error(f"Error generating initial plot: {plot_err}")
 
-    # --- Stages: Equation -> Guesses/Preview -> Results ---
     st.markdown("---")
 
-    # --- Stage 1: Equation Input ---
-    # Only show if we haven't successfully processed an equation OR if results are cleared
     if not st.session_state.show_guess_stage and not st.session_state.fit_results:
         st.subheader("Step 1: Enter Fit Details")
-        st.markdown("""
-        **Instructions:**
-        *   Use `x` for the independent variable.
-        *   Use single uppercase letters (A-Z) for fit parameters.
-        *   Use standard Python math operators: `+`, `-`, `*`, `/`, `**` (power).
-        *   Allowed functions:
-            `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `atan`,
-            `sinh`, `cosh`, `tanh`, `exp`, `log` (natural), `ln` (natural), `log10`,
-            `sqrt`, `abs`, `absolute`.
-        *   Use `pi` for the constant π.
+        st.markdown("""**Instructions:**
+*   Use `x` for the independent variable.
+*   Use single uppercase letters (A-Z) for fit parameters.
+*   Use standard Python math operators: `+`, `-`, `*`, `/`, `**` (power).
+*   Allowed functions: `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `atan`, `sinh`, `cosh`, `tanh`, `exp`, `log` (natural), `ln` (natural), `log10`, `sqrt`, `abs`, `absolute`.
+*   Use `pi` for the constant π.
+**Examples:**
+*   Linear: `A * x + B`
+*   Quadratic: `A * x**2 + B * x + C`""")
 
-        **Examples:**
-        *   Linear: `A * x + B`
-        *   Quadratic: `A * x**2 + B * x + C`
-        *   Power Law: `A * x**B`
-        *   Exponential Decay: `A * exp(-B * x) + C`
-        *   Sine Wave: `A * sin(B * x + C) + D`
-        *   Square Root: `A * sqrt(x) + B`
-        """)
-
-        eq_string_input = st.text_input(
-            "Equation:",
-            value=st.session_state.get('last_eq_input', ""), # Remember last attempt
-            help="Use x, params A-Z, funcs. Ex: A * exp(-B * x) + C",
-            key="equation_input"
-        )
-        st.session_state.plot_title_input = st.text_input( # Store title in session state
-            "Optional Plot Title:",
-            value=st.session_state.get('plot_title_input', ""),
-            help="Leave blank for default title.",
-            key="plot_title_input_widget"
-        )
-
-        # ##################################################################
-        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-        # ##################################################################
+        eq_string_input = st.text_input("Equation:", value=st.session_state.get('last_eq_input', ""), help="Use x, params A-Z, funcs. Ex: A * exp(-B * x) + C", key="equation_input")
+        st.session_state.plot_title_input = st.text_input("Optional Plot Title:", value=st.session_state.get('plot_title_input', ""), help="Leave blank for default title.", key="plot_title_input_widget")
         
-        # --- Buttons to Validate Equation and choose workflow ---
         b_col1, b_col2 = st.columns(2)
         with b_col1:
             manual_fit_button = st.button("Set Equation & Try a Manual Fit", key="manual_fit_button")
         with b_col2:
             direct_autofit_button = st.button("Set Equation & Perform Autofit", key="direct_autofit_button")
 
-        # --- Shared Logic for Both Buttons ---
         if (manual_fit_button or direct_autofit_button) and eq_string_input:
             st.session_state.last_eq_input = eq_string_input
             st.session_state.fit_results = None
@@ -622,8 +515,6 @@ if st.session_state.data_loaded:
                     processed_eq, params_list = validate_and_parse_equation(eq_string_input)
                     legend_label = format_equation_mathtext(processed_eq)
                     fit_function = create_fit_function(processed_eq, params_list)
-
-                    # Store validated info in session state
                     st.session_state.processed_eq_string = processed_eq
                     st.session_state.params = params_list
                     st.session_state.fit_func = fit_function
@@ -634,42 +525,29 @@ if st.session_state.data_loaded:
                 except Exception as e:
                     st.error(f"Unexpected error during setup: {e}")
             
-            # --- Workflow-Specific Logic ---
             if validation_passed:
                 if manual_fit_button:
-                    # Go to the manual guess stage
                     st.session_state.show_guess_stage = True
                     st.rerun()
                 
                 elif direct_autofit_button:
-                    # Attempt the autofit directly
                     default_guesses = [1.0] * len(st.session_state.params)
                     fit_successful = perform_the_autofit(default_guesses)
 
                     if fit_successful:
-                        # Success: go straight to results
                         st.session_state.show_guess_stage = False
                         st.rerun()
                     else:
-                        # Failure: fall back to the manual guess stage
                         st.warning("Automatic fit failed. The model may be too complex or the data too noisy for a default guess. Please provide a manual starting fit.")
-                        # Pre-populate guesses with the default values that failed
                         for i, param in enumerate(st.session_state.params):
                             st.session_state[f"init_guess_{param}"] = default_guesses[i]
                         st.session_state.show_guess_stage = True
                         st.rerun()
 
-        # ##################################################################
-        # ############### END OF MODIFIED CODE BLOCK #######################
-        # ##################################################################
-
-
-    # --- Stage 2: Guess Input & Preview ---
     elif st.session_state.show_guess_stage and not st.session_state.fit_results:
         st.subheader("Step 2: Manual Fit & Preview")
         st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
 
-        # Retrieve from session state
         params = st.session_state.params
         fit_func = st.session_state.fit_func
 
@@ -686,24 +564,20 @@ if st.session_state.data_loaded:
                 if guess_key not in st.session_state:
                     st.session_state[guess_key] = 1.0
                 
-                # --- Dynamic Format for Number Input ---
                 current_value = st.session_state[guess_key]
-                format_specifier = "%.3f"  # Default format for "normal" numbers
+                format_specifier = "%.3f"
                 if current_value != 0:
                     if abs(current_value) < 0.01 or abs(current_value) > 1000:
-                        format_specifier = "%.3e"  # Switch to scientific notation
+                        format_specifier = "%.3e"
 
-                initial_guesses[param] = st.number_input(
-                    f"Parameter {param}",
-                    value=st.session_state[guess_key],
-                    key=guess_key,
-                    step=None, # Better for scientific notation inputs
-                    format=format_specifier
-                )
+                initial_guesses[param] = st.number_input(f"Parameter {param}", value=st.session_state[guess_key], key=guess_key, step=None, format=format_specifier)
 
-        # --- Preview Plot and Chi-squared ---
         st.markdown("---")
         st.write("**Preview with Current Parameter Values:**")
+        
+        # ##################################################################
+        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+        # ##################################################################
         try:
             current_guess_values = [initial_guesses[p] for p in params]
             x_data = st.session_state.x_data
@@ -711,27 +585,33 @@ if st.session_state.data_loaded:
             x_err_safe = st.session_state.x_err_safe
             y_err_safe = st.session_state.y_err_safe
 
-
-            # --- Calculate Residuals and Chi-squared for the preview using the robust method ---
             y_guess_at_points = fit_func(x_data, *current_guess_values)
             residuals_preview = y_data - y_guess_at_points
 
-            # --- Robust Error Propagation for Preview ---
             slopes_preview = numerical_derivative(fit_func, x_data, current_guess_values)
             total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
             total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
-            chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
             dof_preview = len(x_data) - len(params)
-            red_chi_squared_preview = chi_squared_preview / dof_preview if dof_preview > 0 else np.inf
             
-            # --- Display Preview Metrics ---
+            if dof_preview > 0:
+                chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
+                red_chi_squared_preview = chi_squared_preview / dof_preview
+                red_chi_squared_err_preview = np.sqrt(2.0 / dof_preview)
+            else:
+                chi_squared_preview, red_chi_squared_preview, red_chi_squared_err_preview = np.nan, np.nan, np.nan
+
             metric_cols = st.columns(2)
             metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi_squared_preview:.4f}")
-            metric_cols[1].metric(
-                "Manual Fit Reduced χ²/DoF", 
-                f"{red_chi_squared_preview:.4f}",
-                help=f"Calculated with Degrees of Freedom (DoF) = {dof_preview} (N_points - N_params)."
-            )
+            metric_cols[1].metric("Manual Fit Reduced χ²/DoF", f"{red_chi_squared_preview:.4f}", help=f"Calculated with DoF = {dof_preview}")
+
+            # --- Build the legend labels for the preview plot ---
+            equation_label = st.session_state.legend_label_str
+            stats_parts = []
+            for i, p_name in enumerate(params):
+                stats_parts.append(f"${p_name} = {current_guess_values[i]:.4g}$")
+            red_chi2_str_preview = format_value_uncertainty(red_chi_squared_preview, red_chi_squared_err_preview)
+            stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str_preview.replace('$', '')}$")
+            stats_label = "\n".join(stats_parts)
 
             # --- Generate points for the smooth preview curve ---
             x_min_data, x_max_data = np.min(x_data), np.max(x_data)
@@ -743,25 +623,19 @@ if st.session_state.data_loaded:
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
-            ax0_preview.errorbar(
-                x_data, y_data, yerr=y_err_safe, xerr=x_err_safe,
-                fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5
-            )
-            ax0_preview.plot(
-                x_preview_curve, y_preview_curve, 'r--',
-                label='Manual Fit Curve', zorder=10
-            )
+            ax0_preview.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+            ax0_preview.plot(x_preview_curve, y_preview_curve, 'r--', label=equation_label, zorder=10)
+            ax0_preview.plot([], [], ' ', label=stats_label)
+
+            preview_title = st.session_state.plot_title_input.strip() or f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
             ax0_preview.set_ylabel(st.session_state.y_axis_label)
-            ax0_preview.set_title("Data vs. Manual Fit")
-            ax0_preview.legend()
+            ax0_preview.set_title(preview_title)
+            ax0_preview.legend(loc='best', fontsize='large')
             ax0_preview.grid(True, linestyle=':', alpha=0.7)
             ax0_preview.tick_params(axis='x', labelbottom=False)
 
             ax1_preview = fig_preview.add_subplot(gs_preview[1], sharex=ax0_preview)
-            ax1_preview.errorbar(
-                x_data, residuals_preview, yerr=total_err_preview_safe,
-                fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5
-            )
+            ax1_preview.errorbar(x_data, residuals_preview, yerr=total_err_preview_safe, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
             ax1_preview.axhline(0, color='grey', linestyle='--', linewidth=1)
             ax1_preview.set_xlabel(st.session_state.x_axis_label)
             ax1_preview.set_ylabel("Residuals")
@@ -773,23 +647,22 @@ if st.session_state.data_loaded:
 
         except Exception as preview_err:
             st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
-
+        # ##################################################################
+        # ############### END OF MODIFIED CODE BLOCK #######################
+        # ##################################################################
+            
         st.markdown("---")
         st.write("If this manual fit is unsatisfactory, you can start over. If it serves as a good initial guess, proceed to the automatic fit.")
         
-        # --- Action Buttons ---
         b_col1, b_col2 = st.columns(2)
-        
         with b_col1:
             if st.button("Define New Fit", key="redefine_fit_button"):
-                # Clear relevant state variables to go back to Stage 1
                 st.session_state.show_guess_stage = False
                 st.session_state.fit_results = None
                 st.session_state.final_fig = None
                 st.session_state.processed_eq_string = None
                 st.session_state.params = []
                 st.session_state.fit_func = None
-                # Clear guess keys to avoid carrying over old values
                 for key in list(st.session_state.keys()):
                      if key.startswith("init_guess_"):
                          del st.session_state[key]
@@ -799,17 +672,11 @@ if st.session_state.data_loaded:
             autofit_button = st.button("Perform Autofit", key="autofit_button")
         
         if autofit_button:
-            # Get final guesses from the widgets just before fitting
             final_initial_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
-            
-            # --- Perform the fit using the user's manual guesses ---
             if perform_the_autofit(final_initial_guesses):
                 st.session_state.show_guess_stage = False
                 st.rerun()
-            # If it fails, the error message is shown inside the function,
-            # and the user stays on the current page to correct their guesses.
 
-    # --- Stage 4: Show Results ---
     elif st.session_state.fit_results:
         st.subheader("Step 3: Fit Results")
         res = st.session_state.fit_results
@@ -820,38 +687,30 @@ if st.session_state.data_loaded:
         else:
             st.warning("Final plot figure not found in session state.")
 
-        # --- Display Simplified Results Table ---
         st.markdown("##### Fit Statistics")
-        table_rows = []
-        table_rows.append(("**Equation**", f"`y = {res['eq_string']}`"))
-        chi2_str = format_value_uncertainty(res['chi2'], res['chi2_err'])
-        table_rows.append(("**Chi-squared (χ²)**", chi2_str))
-        table_rows.append(("**Degrees of Freedom (DoF)**", f"{res['dof']}"))
+        table_rows = [
+            ("**Equation**", f"`y = {res['eq_string']}`"),
+            ("**Chi-squared (χ²)**", format_value_uncertainty(res['chi2'], res['chi2_err'])),
+            ("**Degrees of Freedom (DoF)**", f"{res['dof']}")
+        ]
 
-        markdown_table = "| Category | Value |\n|---:|:---| \n"
-        for category, value in table_rows:
-            markdown_table += f"| {category} | {value} |\n"
+        markdown_table = "| Category | Value |\n|---:|:---| \n" + "\n".join(f"| {cat} | {val} |" for cat, val in table_rows)
         st.markdown(markdown_table)
         
-        # Download Button
         if st.session_state.final_fig:
             try:
-                plot_title_for_filename = res.get('plot_title', f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit")
+                user_title = st.session_state.plot_title_input.strip()
+                default_title = f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit"
+                plot_title_for_filename = user_title or default_title
                 fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
                 fn += ".svg"
                 img_buffer = io.BytesIO()
                 st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
                 img_buffer.seek(0)
-                st.download_button(
-                    label="Download Plot as SVG",
-                    data=img_buffer,
-                    file_name=fn,
-                    mime="image/svg+xml"
-                )
+                st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml")
             except Exception as dl_err:
                  st.warning(f"Could not prepare plot for download: {dl_err}")
 
-        # Button to go back and define a new fit
         if st.button("Define New Fit"):
             st.session_state.show_guess_stage = False
             st.session_state.fit_results = None
