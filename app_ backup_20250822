@@ -49,7 +49,7 @@ def format_value_uncertainty(value, uncertainty):
 
     # 1. Determine the engineering exponent (multiple of 3) for the uncertainty
     exponent_of_unc = np.floor(np.log10(abs(uncertainty)))
-    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))+3   
+    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))+3
 
     # 2. Scale the value and uncertainty by the chosen exponent
     scaler = 10**(-eng_exponent)
@@ -250,13 +250,13 @@ def perform_the_autofit(initial_guesses):
                 red_chi_squared_err = np.sqrt(2.0 / dof)
             else:
                 chi_squared, chi_squared_err, chi_squared_red, red_chi_squared_err = np.nan, np.nan, np.nan, np.nan
-            
+
             st.session_state.fit_results = {
                 "eq_string": st.session_state.processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final,
                 "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red,
                 "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final, "total_err_final": total_err_final
             }
-            
+
             equation_label = st.session_state.legend_label_str
             stats_parts = []
             for i, p_name in enumerate(params):
@@ -274,7 +274,7 @@ def perform_the_autofit(initial_guesses):
             y_fit_curve = fit_func(x_fit_curve, *popt_final)
             ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
             ax0.plot([], [], ' ', label=stats_label)
-            
+
             user_title_str = st.session_state.plot_title_input.strip()
             final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
             ax0.set_ylabel(st.session_state.y_axis_label)
@@ -292,7 +292,7 @@ def perform_the_autofit(initial_guesses):
             ax1.grid(True, linestyle=':', alpha=0.6)
             fig.tight_layout(pad=1.0)
             st.session_state.final_fig = fig
-            
+
             return True
 
     except Exception as e:
@@ -300,6 +300,24 @@ def perform_the_autofit(initial_guesses):
         st.session_state.fit_results = None
         st.session_state.final_fig = None
         return False
+
+def parse_data_string(data_str: str) -> list[float]:
+    """Cleans and parses a string of numbers separated by spaces, commas, or tabs."""
+    if not isinstance(data_str, str): return []
+    cleaned_str = data_str.strip()
+    if not cleaned_str: return []
+    
+    # Split by one or more occurrences of space, comma, semicolon, or tab
+    items = re.split(r'[\s,;\t]+', cleaned_str)
+    
+    numbers = []
+    for item in items:
+        if item:  # Ensure item is not an empty string
+            try:
+                numbers.append(float(item))
+            except ValueError:
+                raise ValueError(f"Could not convert '{item}' to a number. Please check your input.")
+    return numbers
 
 #custom HTML for banner
 custom_html = """
@@ -322,29 +340,8 @@ custom_html = """
 
 # --- Main App Logic ---
 st.components.v1.html(custom_html)
-st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
 
-@st.cache_data
-def get_data():
-    df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
-                   columns=['time (s)', ' ', 'height (m)' ,' '])
-    return df
-
-@st.cache_data
-def convert_for_download(df):
-    return df.to_csv(index=False).encode("utf-8")
-
-df = get_data()
-csv = convert_for_download(df)
-
-st.download_button(
-    label="Download Example CSV",
-    data=csv,
-    file_name="data.csv",
-    mime="text/csv",
-    icon=":material/download:",
-)
-
+# Initialize session state variables
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
     st.session_state.x_data = None
@@ -370,97 +367,162 @@ if 'legend_label_str' not in st.session_state:
 if 'plot_title_input' not in st.session_state:
     st.session_state.plot_title_input = ""
 
-uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
-if uploaded_file is not None:
-    current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
-    if current_file_key != st.session_state.get('processed_file_key', None):
-        st.info(f"Processing new uploaded file: {uploaded_file.name}")
-        st.session_state.fit_results = None
-        st.session_state.final_fig = None
-        st.session_state.show_guess_stage = False
-        st.session_state.processed_eq_string = None
-        st.session_state.params = []
-        st.session_state.fit_func = None
-        st.session_state.legend_label_str = ""
-        st.session_state.plot_title_input = ""
-        st.session_state.last_eq_input = ""
-        keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-        for key in keys_to_remove:
-            del st.session_state[key]
 
-        try:
-            raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
-            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
-                st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
-                st.session_state.data_loaded = False
-                st.session_state.processed_file_key = None
-                st.stop()
+# --- Data Input Section ---
+tab1, tab2 = st.tabs(["Upload CSV File", "Enter Data Manually"])
+
+with tab1:
+    st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
+    
+    @st.cache_data
+    def get_data():
+        df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
+                       columns=['time (s)', ' ', 'height (m)' ,' '])
+        return df
+
+    @st.cache_data
+    def convert_for_download(df):
+        return df.to_csv(index=False).encode("utf-8")
+
+    df_example = get_data()
+    csv_example = convert_for_download(df_example)
+
+    st.download_button(
+        label="Download Example CSV",
+        data=csv_example,
+        file_name="data.csv",
+        mime="text/csv",
+        icon=":material/download:",
+    )
+
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
+    if uploaded_file is not None:
+        current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+        if current_file_key != st.session_state.get('processed_file_key', None):
+            st.info(f"Processing new uploaded file: {uploaded_file.name}")
+            # Full reset of application state
+            st.session_state.fit_results = None
+            st.session_state.final_fig = None
+            st.session_state.show_guess_stage = False
+            st.session_state.processed_eq_string = None
+            st.session_state.params = []
+            st.session_state.fit_func = None
+            st.session_state.legend_label_str = ""
+            st.session_state.plot_title_input = ""
+            st.session_state.last_eq_input = ""
+            keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
 
             try:
-                x_label = str(raw_df.iloc[0, 0])
-                y_label = str(raw_df.iloc[0, 2])
-            except Exception:
-                x_label = "X (Col 1)"
-                y_label = "Y (Col 3)"
-                st.warning("Could not read labels from header row.")
+                raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
+                if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
+                    st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
+                    st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
+                x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
+                df = raw_df.iloc[1:].copy()
+                if df.empty:
+                    st.error("No data rows found."); st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
+                df.columns = ['x', 'x_err', 'y', 'y_err']
+                df = df.apply(pd.to_numeric, errors='coerce')
+                if df.isnull().values.any():
+                    st.error("Data contains non-numeric values. Please check your CSV file."); st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
 
-            df = raw_df.iloc[1:].copy()
-            if df.empty or df.shape[1] != 4:
-                st.error("No data rows found or incorrect number of columns (expected 4).")
-                st.session_state.data_loaded = False
-                st.session_state.processed_file_key = None
+                st.session_state.x_data = df['x'].to_numpy(); st.session_state.y_data = df['y'].to_numpy()
+                st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy())); st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
+                st.session_state.x_axis_label = x_label; st.session_state.y_axis_label = y_label
+                st.session_state.df_head = df.head(10)
+                st.session_state.data_loaded = True; st.session_state.processed_file_key = current_file_key
+                st.success("New data loaded successfully!")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"An unexpected error occurred while processing the file: {e}")
+                st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
+
+with tab2:
+    st.write("Enter data and axis labels below. Separate numbers with spaces, commas, or new lines.")
+    with st.form("manual_data_form"):
+        # Text inputs for labels
+        label_col1, label_col2 = st.columns(2)
+        with label_col1:
+            x_label_manual = st.text_input("X-Axis Label", "time (s)")
+        with label_col2:
+            y_label_manual = st.text_input("Y-Axis Label", "height (m)")
+
+        # Text areas for data columns
+        data_col1, data_col2, data_col3, data_col4 = st.columns(4)
+        with data_col1:
+            x_data_manual = st.text_area("X-Values", "0.0\n0.05\n0.1\n0.15\n0.2\n0.25\n0.3")
+        with data_col2:
+            x_err_manual = st.text_area("X-Uncertainties", "0.001")
+        with data_col3:
+            y_data_manual = st.text_area("Y-Values", "0.2598\n0.3521\n0.4176\n0.4593\n0.4768\n0.4696\n0.4380")
+        with data_col4:
+            y_err_manual = st.text_area("Y-Uncertainties", "0.001")
+        
+        submitted = st.form_submit_button("Load Manual Data")
+
+    if submitted:
+        try:
+            # Step 1: Parse all data from text areas
+            x_dat = parse_data_string(x_data_manual)
+            y_dat = parse_data_string(y_data_manual)
+            x_err = parse_data_string(x_err_manual)
+            y_err = parse_data_string(y_err_manual)
+            
+            # Step 2: Validate the parsed data
+            if not x_dat or not y_dat:
+                st.error("X-Values and Y-Values cannot be empty."); st.stop()
+
+            # Handle single uncertainty values by broadcasting them to the full data length
+            if len(x_err) == 1: x_err = [x_err[0]] * len(x_dat)
+            if len(y_err) == 1: y_err = [y_err[0]] * len(y_dat)
+
+            # Check for consistent lengths
+            if not (len(x_dat) == len(y_dat) == len(x_err) == len(y_err)):
+                st.error(f"Data length mismatch! X: {len(x_dat)}, Y: {len(y_dat)}, X_Err: {len(x_err)}, Y_Err: {len(y_err)}. All columns must have the same number of entries (a single uncertainty value is applied to all points).")
                 st.stop()
+            
+            # Step 3: Data is valid. Unconditionally reset the application state.
+            st.info("Processing manual data...")
+            st.session_state.fit_results = None
+            st.session_state.final_fig = None
+            st.session_state.show_guess_stage = False
+            st.session_state.processed_eq_string = None
+            st.session_state.params = []
+            st.session_state.fit_func = None
+            st.session_state.legend_label_str = ""
+            st.session_state.plot_title_input = ""
+            st.session_state.last_eq_input = ""
+            keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
 
-            df.columns = ['x', 'x_err', 'y', 'y_err']
-            converted_cols = {}
-            conversion_failed = False
-            for col in df.columns:
-                try:
-                    numeric_col = pd.to_numeric(df[col], errors='coerce')
-                    if numeric_col.isnull().any():
-                        first_bad_index = numeric_col.index[numeric_col.isnull()][0] + 2
-                        st.error(f"Column '{col}' contains non-numeric data near row {first_bad_index}. Please check your CSV.")
-                        conversion_failed = True
-                        break
-                    else:
-                        converted_cols[col] = numeric_col
-                except Exception as e:
-                    st.error(f"Error converting column '{col}': {e}")
-                    conversion_failed = True
-                    break
+            # Step 4: Load the new data into session_state
+            df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
 
-            if conversion_failed:
-                st.session_state.data_loaded = False
-                st.session_state.processed_file_key = None
-                st.stop()
-
-            df = pd.DataFrame(converted_cols)
-
-            st.session_state.x_data = df['x'].to_numpy()
-            st.session_state.y_data = df['y'].to_numpy()
-            st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
-            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
-            st.session_state.x_axis_label = x_label
-            st.session_state.y_axis_label = y_label
-            st.session_state.df_head = df.head(10)
-
+            st.session_state.x_data = df_manual['x'].to_numpy()
+            st.session_state.y_data = df_manual['y'].to_numpy()
+            st.session_state.x_err_safe = safeguard_errors(np.abs(df_manual['x_err'].to_numpy()))
+            st.session_state.y_err_safe = safeguard_errors(np.abs(df_manual['y_err'].to_numpy()))
+            st.session_state.x_axis_label = x_label_manual.strip() if x_label_manual.strip() else "X"
+            st.session_state.y_axis_label = y_label_manual.strip() if y_label_manual.strip() else "Y"
+            st.session_state.df_head = df_manual.head(10)
+            
+            # Step 5: Set a new key and status, then rerun the app
+            manual_data_key = f"manual_{x_label_manual}_{y_label_manual}_{x_data_manual}_{x_err_manual}_{y_data_manual}_{y_err_manual}"
+            st.session_state.processed_file_key = manual_data_key
             st.session_state.data_loaded = True
-            st.session_state.processed_file_key = current_file_key
-            st.success("New data loaded successfully!")
+            st.success("Manual data loaded successfully!")
+            st.rerun()
 
-        except pd.errors.ParserError as pe:
-            st.error(f"CSV Parsing Error: {pe}. Check file format and delimiters.")
-            st.session_state.data_loaded = False
-            st.session_state.processed_file_key = None
-            st.stop()
+        except ValueError as e:
+            st.error(f"Input Error: {e}")
         except Exception as e:
-            st.error(f"An unexpected error occurred while processing the file: {e}")
-            import traceback
-            st.error(traceback.format_exc())
-            st.session_state.data_loaded = False
-            st.session_state.processed_file_key = None
-            st.stop()
+            st.error(f"An unexpected error occurred: {e}")
 
+# --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
     if st.session_state.df_head is not None:
         st.markdown("---")
@@ -499,7 +561,7 @@ if st.session_state.data_loaded:
 
         eq_string_input = st.text_input("Equation:", value=st.session_state.get('last_eq_input', ""), help="Use x, params A-Z, funcs. Ex: A * exp(-B * x) + C", key="equation_input")
         st.session_state.plot_title_input = st.text_input("Optional Plot Title:", value=st.session_state.get('plot_title_input', ""), help="Leave blank for default title.", key="plot_title_input_widget")
-        
+
         b_col1, b_col2 = st.columns(2)
         with b_col1:
             manual_fit_button = st.button("Set Equation & Try a Manual Fit", key="manual_fit_button")
@@ -525,12 +587,12 @@ if st.session_state.data_loaded:
                     st.error(f"Input Error: {e}")
                 except Exception as e:
                     st.error(f"Unexpected error during setup: {e}")
-            
+
             if validation_passed:
                 if manual_fit_button:
                     st.session_state.show_guess_stage = True
                     st.rerun()
-                
+
                 elif direct_autofit_button:
                     default_guesses = [1.0] * len(st.session_state.params)
                     fit_successful = perform_the_autofit(default_guesses)
@@ -564,7 +626,7 @@ if st.session_state.data_loaded:
                 guess_key = f"init_guess_{param}"
                 if guess_key not in st.session_state:
                     st.session_state[guess_key] = 1.0
-                
+
                 current_value = st.session_state[guess_key]
                 format_specifier = "%.3f"
                 if current_value != 0:
@@ -575,10 +637,7 @@ if st.session_state.data_loaded:
 
         st.markdown("---")
         st.write("**Preview with Current Parameter Values:**")
-        
-        # ##################################################################
-        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-        # ##################################################################
+
         try:
             current_guess_values = [initial_guesses[p] for p in params]
             x_data = st.session_state.x_data
@@ -593,7 +652,7 @@ if st.session_state.data_loaded:
             total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
             total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
             dof_preview = len(x_data) - len(params)
-            
+
             if dof_preview > 0:
                 chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
                 red_chi_squared_preview = chi_squared_preview / dof_preview
@@ -622,7 +681,7 @@ if st.session_state.data_loaded:
             # --- Create a two-panel plot (main + residuals) ---
             fig_preview = plt.figure(figsize=(10, 8))
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-            
+
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
             ax0_preview.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
             ax0_preview.plot(x_preview_curve, y_preview_curve, 'r--', label=equation_label, zorder=10)
@@ -641,20 +700,17 @@ if st.session_state.data_loaded:
             ax1_preview.set_xlabel(st.session_state.x_axis_label)
             ax1_preview.set_ylabel("Residuals")
             ax1_preview.grid(True, linestyle=':', alpha=0.6)
-            
+
             fig_preview.tight_layout(pad=1.0)
             st.pyplot(fig_preview)
             plt.close(fig_preview)
 
         except Exception as preview_err:
             st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
-        # ##################################################################
-        # ############### END OF MODIFIED CODE BLOCK #######################
-        # ##################################################################
-            
+
         st.markdown("---")
         st.write("If this manual fit is unsatisfactory, you can start over. If it serves as a good initial guess, proceed to the automatic fit.")
-        
+
         b_col1, b_col2 = st.columns(2)
         with b_col1:
             if st.button("Define New Fit", key="redefine_fit_button"):
@@ -671,7 +727,7 @@ if st.session_state.data_loaded:
 
         with b_col2:
             autofit_button = st.button("Perform Autofit", key="autofit_button")
-        
+
         if autofit_button:
             final_initial_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
             if perform_the_autofit(final_initial_guesses):
@@ -697,7 +753,7 @@ if st.session_state.data_loaded:
 
         markdown_table = "| Category | Value |\n|---:|:---| \n" + "\n".join(f"| {cat} | {val} |" for cat, val in table_rows)
         st.markdown(markdown_table)
-        
+
         if st.session_state.final_fig:
             try:
                 user_title = st.session_state.plot_title_input.strip()
@@ -726,5 +782,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 5/20/2025")
-
+st.caption("Updated 8/22/2025")
