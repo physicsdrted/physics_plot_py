@@ -323,11 +323,11 @@ def perform_the_autofit(initial_guesses):
             fig = plt.figure(figsize=(10, 9.8))
             gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             ax0 = fig.add_subplot(gs[0])
+            ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
             x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
             y_fit_curve = fit_func(x_fit_curve, *popt_final)
             ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
-            ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-            ax0.plot([], [], ' ', label=stats_label) # Invisible element for stats
+            ax0.plot([], [], ' ', label=stats_label)
             
             user_title_str = st.session_state.plot_title_input.strip()
             final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
