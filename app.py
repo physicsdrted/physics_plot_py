@@ -462,9 +462,6 @@ with tab2:
         
         submitted = st.form_submit_button("Load Manual Data")
 
-    # ##################################################################
-    # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-    # ##################################################################
     if submitted:
         try:
             # Step 1: Parse all data from text areas
@@ -523,9 +520,6 @@ with tab2:
             st.error(f"Input Error: {e}")
         except Exception as e:
             st.error(f"An unexpected error occurred: {e}")
-    # ##################################################################
-    # ############### END OF MODIFIED CODE BLOCK #######################
-    # ##################################################################
 
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
@@ -787,4 +781,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 5/20/2025")
+st.caption("Updated 8/22/2025")
