@@ -226,6 +226,139 @@ def format_equation_mathtext(eq_string_orig):
     return formatted_final
 
 
+# ##################################################################
+# ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+# ##################################################################
+def perform_the_autofit(initial_guesses):
+    """
+    Takes a list of initial guesses, performs the iterative curve fit,
+    and stores results in the session state.
+    Returns True on success, False on failure.
+    """
+    try:
+        with st.spinner("Performing iterative fit... Please wait."):
+            # --- Retrieve data and functions from session state ---
+            fit_func = st.session_state.fit_func
+            params = st.session_state.params
+            x_data = st.session_state.x_data
+            y_data = st.session_state.y_data
+            x_err_safe = st.session_state.x_err_safe
+            y_err_safe = st.session_state.y_err_safe
+
+            popt_current = list(initial_guesses)
+            pcov_current = None
+            total_err_current = y_err_safe.copy()
+            fit_successful_internal = True
+
+            # --- Iterative Fitting Loop ---
+            max_iterations = 4
+            for i in range(max_iterations):
+                sigma_to_use = total_err_current.copy()
+
+                if not np.all(np.isfinite(sigma_to_use)) or np.any(sigma_to_use <= 0):
+                    sigma_to_use = None
+                if not all(np.isfinite(p) for p in popt_current):
+                    raise RuntimeError(f"Invalid initial parameter guess detected ({popt_current}).")
+
+                try:
+                    popt_current, pcov_current = curve_fit(
+                        fit_func, x_data, y_data, sigma=sigma_to_use, p0=popt_current,
+                        absolute_sigma=True, maxfev=8000, check_finite=(True, True)
+                    )
+                    if not np.all(np.isfinite(popt_current)):
+                        raise RuntimeError("Fit resulted in non-finite parameters.")
+                    if pcov_current is None or not np.all(np.isfinite(np.diag(pcov_current))) or np.any(np.diag(pcov_current) < 0):
+                        if pcov_current is None: pcov_current = np.full((len(params), len(params)), np.inf)
+
+                except RuntimeError as fit_error:
+                    # This is the most common failure point for bad initial guesses
+                    raise RuntimeError(f"Fit failed to converge: {fit_error}") from fit_error
+
+                # Update errors for the next iteration
+                if i < max_iterations - 1:
+                    slopes = numerical_derivative(fit_func, x_data, popt_current)
+                    if np.all(np.isfinite(slopes)):
+                        total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
+                        total_err_current = safeguard_errors(np.sqrt(total_err_sq))
+                    else:
+                        total_err_current = y_err_safe.copy()
+
+            # --- Fit Succeeded: Process and Store Results ---
+            popt_final = popt_current
+            pcov_final = pcov_current
+            total_err_final = sigma_to_use if sigma_to_use is not None else np.ones_like(y_data)
+
+            diag_pcov = np.diag(pcov_final)
+            perr_final = np.sqrt(diag_pcov) if not np.any(diag_pcov < 0) else np.full(len(popt_final), np.nan)
+
+            residuals_final = y_data - fit_func(x_data, *popt_final)
+            dof = len(y_data) - len(popt_final)
+            if dof > 0:
+                chi_squared = np.sum((residuals_final / total_err_final)**2)
+                chi_squared_err = np.sqrt(2.0 * dof)
+                chi_squared_red = chi_squared / dof
+                red_chi_squared_err = np.sqrt(2.0 / dof)
+            else:
+                chi_squared, chi_squared_err, chi_squared_red, red_chi_squared_err = np.nan, np.nan, np.nan, np.nan
+            
+            # --- Store all results in session state ---
+            st.session_state.fit_results = {
+                "eq_string": st.session_state.processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final,
+                "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red,
+                "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final
+            }
+            
+            # --- Generate the Final Plot Figure ---
+            # Part 1: Equation Label
+            equation_label = st.session_state.legend_label_str
+            # Part 2: Statistics Label
+            stats_parts = []
+            for i, p_name in enumerate(params):
+                param_str = format_value_uncertainty(popt_final[i], perr_final[i])
+                stats_parts.append(f"${p_name} = {param_str.replace('$', '')}$")
+            red_chi2_str = format_value_uncertainty(chi_squared_red, red_chi_squared_err)
+            stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
+            stats_label = "\n".join(stats_parts)
+
+            fig = plt.figure(figsize=(10, 9.8))
+            gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+            ax0 = fig.add_subplot(gs[0])
+            x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
+            y_fit_curve = fit_func(x_fit_curve, *popt_final)
+            ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
+            ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+            ax0.plot([], [], ' ', label=stats_label) # Invisible element for stats
+            
+            user_title_str = st.session_state.plot_title_input.strip()
+            final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
+            ax0.set_ylabel(st.session_state.y_axis_label)
+            ax0.set_title(final_plot_title)
+            ax0.legend(loc='best', fontsize='large')
+            ax0.grid(True, linestyle=':', alpha=0.6)
+            ax0.tick_params(axis='x', labelbottom=False)
+            ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
+
+            ax1 = fig.add_subplot(gs[1], sharex=ax0)
+            ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+            ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
+            ax1.set_xlabel(st.session_state.x_axis_label)
+            ax1.set_ylabel("Residuals")
+            ax1.grid(True, linestyle=':', alpha=0.6)
+            fig.tight_layout(pad=1.0)
+            st.session_state.final_fig = fig
+            
+            return True # Success
+
+    except Exception as e:
+        st.error(f"Error during fitting process: {e}")
+        st.session_state.fit_results = None
+        st.session_state.final_fig = None
+        return False # Failure
+
+# ##################################################################
+# ############### END OF MODIFIED CODE BLOCK #######################
+# ##################################################################
+
 #custom HTML for banner
 custom_html = """
 <div class="banner">
@@ -467,17 +600,27 @@ if st.session_state.data_loaded:
             key="plot_title_input_widget"
         )
 
-        # --- Button to Validate Equation and Move to Guess Stage ---
-        set_eq_button = st.button("Set Equation & Enter Starting Values", key="set_equation_button")
+        # ##################################################################
+        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
+        # ##################################################################
+        
+        # --- Buttons to Validate Equation and choose workflow ---
+        b_col1, b_col2 = st.columns(2)
+        with b_col1:
+            manual_fit_button = st.button("Set Equation & Try a Manual Fit", key="manual_fit_button")
+        with b_col2:
+            direct_autofit_button = st.button("Set Equation & Perform Autofit", key="direct_autofit_button")
 
-        if set_eq_button and eq_string_input:
-            st.session_state.last_eq_input = eq_string_input # Store for convenience
-            st.session_state.fit_results = None # Clear previous results
+        # --- Shared Logic for Both Buttons ---
+        if (manual_fit_button or direct_autofit_button) and eq_string_input:
+            st.session_state.last_eq_input = eq_string_input
+            st.session_state.fit_results = None
             st.session_state.final_fig = None
+            validation_passed = False
             with st.spinner("Validating equation..."):
                 try:
                     processed_eq, params_list = validate_and_parse_equation(eq_string_input)
-                    legend_label = format_equation_mathtext(processed_eq) # Format for display later
+                    legend_label = format_equation_mathtext(processed_eq)
                     fit_function = create_fit_function(processed_eq, params_list)
 
                     # Store validated info in session state
@@ -485,15 +628,41 @@ if st.session_state.data_loaded:
                     st.session_state.params = params_list
                     st.session_state.fit_func = fit_function
                     st.session_state.legend_label_str = legend_label
-                    st.session_state.show_guess_stage = True # Flag to move to next stage
-                    st.rerun() # Rerun to show the guess section
+                    validation_passed = True
+                except (ValueError, SyntaxError, RuntimeError) as e:
+                    st.error(f"Input Error: {e}")
+                except Exception as e:
+                    st.error(f"Unexpected error during setup: {e}")
+            
+            # --- Workflow-Specific Logic ---
+            if validation_passed:
+                if manual_fit_button:
+                    # Go to the manual guess stage
+                    st.session_state.show_guess_stage = True
+                    st.rerun()
+                
+                elif direct_autofit_button:
+                    # Attempt the autofit directly
+                    default_guesses = [1.0] * len(st.session_state.params)
+                    fit_successful = perform_the_autofit(default_guesses)
 
-                except (ValueError, SyntaxError, RuntimeError) as e_setup:
-                    st.error(f"Input Error: {e_setup}")
-                except Exception as e_setup:
-                    st.error(f"Unexpected error during setup: {e_setup}")
-                    import traceback
-                    st.error(traceback.format_exc())
+                    if fit_successful:
+                        # Success: go straight to results
+                        st.session_state.show_guess_stage = False
+                        st.rerun()
+                    else:
+                        # Failure: fall back to the manual guess stage
+                        st.warning("Automatic fit failed. The model may be too complex or the data too noisy for a default guess. Please provide a manual starting fit.")
+                        # Pre-populate guesses with the default values that failed
+                        for i, param in enumerate(st.session_state.params):
+                            st.session_state[f"init_guess_{param}"] = default_guesses[i]
+                        st.session_state.show_guess_stage = True
+                        st.rerun()
+
+        # ##################################################################
+        # ############### END OF MODIFIED CODE BLOCK #######################
+        # ##################################################################
+
 
     # --- Stage 2: Guess Input & Preview ---
     elif st.session_state.show_guess_stage and not st.session_state.fit_results:
@@ -630,304 +799,49 @@ if st.session_state.data_loaded:
             autofit_button = st.button("Perform Autofit", key="autofit_button")
         
         if autofit_button:
-            # --- Stage 3: Perform Fit ---
-            with st.spinner("Performing iterative fit... Please wait."):
-                try:
-                    # Get final guesses just before fitting
-                    final_initial_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
-
-                    # --- Fit with User's Initial Guesses ---
-                    x_data = st.session_state.x_data
-                    y_data = st.session_state.y_data
-                    x_err_safe = st.session_state.x_err_safe
-                    y_err_safe = st.session_state.y_err_safe
-
-                    popt_current = list(final_initial_guesses) # Start from user guesses
-                    pcov_current = None
-                    total_err_current = y_err_safe.copy() # Start with y-errors only
-                    fit_successful = True
-
-                    # --- Iterative Fitting Loop ---
-                    fit_progress_area = st.empty()
-                    max_iterations = 4 # Or make this configurable
-                    for i in range(max_iterations):
-                        fit_num = i + 1
-                        fit_progress_area.info(f"Running Fit Iteration {fit_num}/{max_iterations}...")
-                        sigma_to_use = total_err_current.copy() # Use errors from previous iteration (or initial y-err)
-
-                        # Check if sigma has valid values before fitting
-                        if not np.all(np.isfinite(sigma_to_use)) or np.any(sigma_to_use <= 0):
-                             st.warning(f"Fit Iteration {fit_num}: Invalid sigma values detected. Using uniform weights for this iteration.")
-                             sigma_to_use = None # Fallback to unweighted fit for this step
-                        elif np.all(sigma_to_use < 1e-15): # Avoid extremely small sigmas
-                             st.warning(f"Fit Iteration {fit_num}: Very small sigma values detected. Using uniform weights for this iteration.")
-                             sigma_to_use = None
-
-                        # Check if initial guesses are valid
-                        if not all(np.isfinite(p) for p in popt_current):
-                             st.error(f"Fit Iteration {fit_num}: Invalid initial parameter guess detected ({popt_current}). Fit aborted.")
-                             fit_successful = False
-                             break
-
-                        try:
-                            popt_current, pcov_current = curve_fit(
-                                fit_func,
-                                x_data,
-                                y_data,
-                                sigma=sigma_to_use,
-                                p0=popt_current, # Use current params as guess for next iter
-                                absolute_sigma=True, # Treat sigma as absolute std deviations
-                                maxfev=5000 + i*3000, # Increase max evaluations
-                                check_finite=(True, True) # Ensure input data is finite
-                            )
-                            # Basic check on results
-                            if not np.all(np.isfinite(popt_current)):
-                                raise RuntimeError("Fit resulted in non-finite parameters.")
-                            if pcov_current is None or not np.all(np.isfinite(np.diag(pcov_current))) or np.any(np.diag(pcov_current) < 0):
-                                st.warning(f"Fit Iteration {fit_num}: Covariance matrix calculation issues. Uncertainties might be unreliable.")
-                                # Try to estimate pcov again if possible or proceed cautiously
-                                if pcov_current is None: pcov_current = np.full((len(params), len(params)), np.inf) # Assign infinite variance
-
-
-                        except RuntimeError as fit_error:
-                            st.error(f"Error during fit iteration {fit_num}: {fit_error}. Trying to continue or aborting...")
-                            # Option 1: Abort (Safer)
-                            fit_successful = False
-                            break
-                            # Option 2: Try to proceed cautiously (might give bad results)
-                            # if i > 0: # If not the first iteration, maybe use previous result?
-                            #     st.warning("Using parameters from previous successful iteration.")
-                            # else: # First iteration failed
-                            #     fit_successful = False
-                            #     break # Abort if first fails
-                        except Exception as fit_error:
-                             st.error(f"Unexpected error during fit iteration {fit_num}: {fit_error} ({type(fit_error).__name__})")
-                             fit_successful = False
-                             break
-
-                        # Update errors for the *next* iteration (if not the last one)
-                        if i < max_iterations - 1 and fit_successful:
-                            try:
-                                slopes = numerical_derivative(fit_func, x_data, popt_current)
-                                # Check if slopes are valid before using them
-                                if np.all(np.isfinite(slopes)):
-                                    total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
-                                    total_err_current = safeguard_errors(np.sqrt(total_err_sq))
-                                else:
-                                    st.warning(f"Fit Iteration {fit_num}: Could not calculate valid slopes for error propagation. Using only y-errors for next iteration.")
-                                    total_err_current = y_err_safe.copy()
-                            except Exception as deriv_err:
-                                 st.warning(f"Fit Iteration {fit_num}: Error calculating derivative for error propagation: {deriv_err}. Using only y-errors for next iteration.")
-                                 total_err_current = y_err_safe.copy()
-
-
-                    fit_progress_area.empty() # Clear progress message
-
-                    if not fit_successful or popt_current is None or pcov_current is None:
-                        st.error("Fit failed to converge or produce valid results.")
-                        # Keep showing guess stage
-                        st.session_state.fit_results = None
-                        st.rerun() # Rerun to stay on guess page with error message
-
-                    # --- Fit Succeeded: Process Results ---
-                    popt_final = popt_current
-                    pcov_final = pcov_current
-                    # Use the sigma that was *used* for the final successful fit
-                    total_err_final = sigma_to_use if sigma_to_use is not None else np.ones_like(y_data) # Use ones if unweighted was forced
-
-                    try:
-                        diag_pcov = np.diag(pcov_final)
-                        if np.any(diag_pcov < 0):
-                             st.warning("Negative variance found in covariance matrix. Uncertainties are unreliable (set to NaN).")
-                             perr_final = np.full(len(popt_final), np.nan)
-                        else:
-                            perr_final = np.sqrt(diag_pcov)
-                    except Exception as perr_calc_err:
-                         st.warning(f"Could not calculate parameter errors from covariance: {perr_calc_err}. Setting errors to NaN.")
-                         perr_final = np.full(len(popt_final), np.nan)
-
-
-                    residuals_final = y_data - fit_func(x_data, *popt_final)
-
-                    # --- Chi-squared Calculation ---
-                    chi_squared = np.inf
-                    chi_squared_err = np.nan
-                    chi_squared_red = np.inf
-                    red_chi_squared_err = np.nan
-                    dof = len(y_data) - len(popt_final)
-
-                    if dof > 0:
-                        # Check if final errors are valid for chi2 calc
-                        valid_err_mask = np.isfinite(total_err_final) & (total_err_final > 1e-15) # Avoid division by zero/NaN/Inf
-                        if np.sum(valid_err_mask) == len(y_data): # All errors are valid
-                             chi_squared = np.sum((residuals_final / total_err_final)**2)
-                             chi_squared_err = np.sqrt(2.0 * dof)
-                             chi_squared_red = chi_squared / dof
-                             red_chi_squared_err = np.sqrt(2.0 / dof)
-                        elif np.sum(valid_err_mask) > len(popt_final): # Some valid errors, calculate with subset? Or report NaN?
-                            st.warning(f"Chi-squared calculated using only {np.sum(valid_err_mask)} points with valid errors.")
-                            chi_squared = np.sum((residuals_final[valid_err_mask] / total_err_final[valid_err_mask])**2)
-                            dof_subset = np.sum(valid_err_mask) - len(popt_final)
-                            if dof_subset > 0 :
-                                chi_squared_err = np.sqrt(2.0 * dof_subset)
-                                chi_squared_red = chi_squared / dof_subset
-                                red_chi_squared_err = np.sqrt(2.0 / dof_subset)
-                            else:
-                                chi_squared = np.inf # Not enough points for subset calc
-                                chi_squared_red = np.inf
-
-                        else:
-                             st.warning("Insufficient valid error values to calculate Chi-squared reliably.")
-                             chi_squared = np.nan
-                             chi_squared_red = np.nan
-                    else:
-                         st.warning("Degrees of freedom <= 0. Cannot calculate reduced Chi-squared or its uncertainty.")
-
-
-                    user_title_str = st.session_state.plot_title_input.strip() # Retrieve from session state
-                    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}."
-
-                    # Store results in session state
-                    st.session_state.fit_results = {
-                        "eq_string": st.session_state.processed_eq_string,
-                        "params": params,
-                        "popt": popt_final,
-                        "perr": perr_final,
-                        "chi2": chi_squared,
-                        "chi2_err": chi_squared_err,
-                        "dof": dof,
-                        "red_chi2": chi_squared_red,
-                        "red_chi2_err": red_chi_squared_err,
-                        "total_err_final": total_err_final,
-                        "residuals_final": residuals_final,
-                        "plot_title": final_plot_title,
-                        "legend_label": st.session_state.legend_label_str # Use stored label
-                    }
-
-                    # ##################################################################
-                    # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-                    # ##################################################################
-
-                    # --- Build the legend labels in three parts ---
-                    # Part 1: Equation Label
-                    equation_label = st.session_state.legend_label_str
-
-                    # Part 2: Statistics Label (for the invisible plot element)
-                    stats_parts = []
-                    # Add Parameters
-                    for i, p_name in enumerate(params):
-                        param_str = format_value_uncertainty(popt_final[i], perr_final[i])
-                        # Format for the legend: P = (value ± unc), removing outer '$' from the helper
-                        stats_parts.append(f"${p_name} = {param_str.replace('$', '')}$")
-                    # Add Reduced Chi-squared
-                    red_chi2_str = format_value_uncertainty(chi_squared_red, red_chi_squared_err)
-                    # The mathtext for chi-squared is \chi^2
-                    stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
-                    # Join the stats parts with newlines
-                    stats_label = "\n".join(stats_parts)
-
-
-                    # --- Generate Final Plot Figure ---
-                    fig = plt.figure(figsize=(10, 9.8))
-                    gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-                    ax0 = fig.add_subplot(gs[0])
-
-                    # Plot 1: The fit curve, with only the equation as its label.
-                    x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
-                    y_fit_curve = fit_func(x_fit_curve, *popt_final)
-                    ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
-
-                    # Plot 2: The data points, with the label "Data".
-                    ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-
-                    # Plot 3: An INVISIBLE plot element that exists only to hold the statistics label in the legend.
-                    ax0.plot([], [], ' ', label=stats_label)
-
-                    ax0.set_ylabel(st.session_state.y_axis_label)
-                    ax0.set_title(final_plot_title)
-                    # The legend() call will now automatically create the three desired sections in the correct order.
-                    ax0.legend(loc='best', fontsize='large')
-                    ax0.grid(True, linestyle=':', alpha=0.6)
-                    ax0.tick_params(axis='x', labelbottom=False)
-                    ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
-
-                    ax1 = fig.add_subplot(gs[1], sharex=ax0)
-                    ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-                    ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
-                    ax1.set_xlabel(st.session_state.x_axis_label)
-                    ax1.set_ylabel("Residuals")
-                    ax1.grid(True, linestyle=':', alpha=0.6)
-                    fig.tight_layout(pad=1.0)
-                    st.session_state.final_fig = fig # Store the figure itself
-                    
-                    # ##################################################################
-                    # ############### END OF MODIFIED CODE BLOCK #######################
-                    # ##################################################################
-
-                    # Clear the flag that shows the guess stage
-                    st.session_state.show_guess_stage = False
-                    st.rerun() # Rerun to display results
-
-                except Exception as e:
-                    st.error(f"Error during fitting process: {e}")
-                    import traceback
-                    st.error(traceback.format_exc()) # Show full traceback for debugging
-                    # Reset state partially to allow user to try again?
-                    st.session_state.fit_results = None # Clear results
-                    st.session_state.final_fig = None
-                    # Keep st.session_state.show_guess_stage = True so they stay on guess page
+            # Get final guesses from the widgets just before fitting
+            final_initial_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
+            
+            # --- Perform the fit using the user's manual guesses ---
+            if perform_the_autofit(final_initial_guesses):
+                st.session_state.show_guess_stage = False
+                st.rerun()
+            # If it fails, the error message is shown inside the function,
+            # and the user stays on the current page to correct their guesses.
 
     # --- Stage 4: Show Results ---
     elif st.session_state.fit_results:
-        # ##################################################################
-        # ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-        # ##################################################################
         st.subheader("Step 3: Fit Results")
-        res = st.session_state.fit_results # Retrieve results
+        res = st.session_state.fit_results
 
-        # Display Plot
         if st.session_state.final_fig:
             st.pyplot(st.session_state.final_fig)
-            plt.close(st.session_state.final_fig) # Close figure after displaying
+            plt.close(st.session_state.final_fig)
         else:
             st.warning("Final plot figure not found in session state.")
 
-        # --- Display Results Table using Markdown for proper rendering ---
+        # --- Display Simplified Results Table ---
         st.markdown("##### Fit Statistics")
-        
-        # Build the table row by row
         table_rows = []
         table_rows.append(("**Equation**", f"`y = {res['eq_string']}`"))
-
-        # Parameters and Reduced Chi-Squared are now in the plot legend.
-        
         chi2_str = format_value_uncertainty(res['chi2'], res['chi2_err'])
         table_rows.append(("**Chi-squared (χ²)**", chi2_str))
-        
         table_rows.append(("**Degrees of Freedom (DoF)**", f"{res['dof']}"))
 
-        # Create the markdown table string
         markdown_table = "| Category | Value |\n|---:|:---| \n"
         for category, value in table_rows:
             markdown_table += f"| {category} | {value} |\n"
-        
         st.markdown(markdown_table)
-        # ##################################################################
-        # ############### END OF MODIFIED CODE BLOCK #######################
-        # ##################################################################
         
         # Download Button
-        if st.session_state.final_fig: # Check again just in case
+        if st.session_state.final_fig:
             try:
                 plot_title_for_filename = res.get('plot_title', f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit")
                 fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
                 fn += ".svg"
-
                 img_buffer = io.BytesIO()
-                # Re-use the stored figure object
                 st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
                 img_buffer.seek(0)
-
                 st.download_button(
                     label="Download Plot as SVG",
                     data=img_buffer,
@@ -939,73 +853,16 @@ if st.session_state.data_loaded:
 
         # Button to go back and define a new fit
         if st.button("Define New Fit"):
-            # Clear relevant state variables
             st.session_state.show_guess_stage = False
             st.session_state.fit_results = None
             st.session_state.final_fig = None
             st.session_state.processed_eq_string = None
             st.session_state.params = []
             st.session_state.fit_func = None
-            # Maybe clear guess keys too?
             for key in list(st.session_state.keys()):
                  if key.startswith("init_guess_"):
                      del st.session_state[key]
             st.rerun()
-
-    else: # If data is loaded AND results exist, display them
-        # --- Display Results Section ---
-        st.markdown("---")
-        st.subheader("Fit Results")
-        if st.session_state.final_fig:
-            st.pyplot(st.session_state.final_fig)
-        
-        res = st.session_state.fit_results
-        table_rows = []
-        table_rows.append({"Category": "Equation", "Value": f"y = {res['eq_string']}", "Uncertainty": ""})
-        
-        for i, p_name in enumerate(res['params']):
-            table_rows.append({
-                "Category": f"Parameter: {p_name}",
-                "Value": f"{res['popt'][i]:.5g}",
-                "Uncertainty": f"{res['perr'][i]:.3g}"
-            })
-        
-        table_rows.append({
-            "Category": "Chi-squared (χ²)",
-            "Value": f"{res['chi2']:.4f}",
-            "Uncertainty": f"{res['chi2_err']:.3f}" if res['dof'] > 0 else ""
-        })
-        
-        table_rows.append({
-            "Category": "Degrees of Freedom (DoF)",
-            "Value": f"{res['dof']}",
-            "Uncertainty": ""
-        })
-        
-        table_rows.append({
-            "Category": "Reduced χ²/DoF",
-            "Value": f"{res['red_chi2']:.4f}" if res['dof'] > 0 else "N/A",
-            "Uncertainty": f"{res['red_chi2_err']:.3f}" if res['dof'] > 0 else ""
-        })
-        
-        results_df = pd.DataFrame(table_rows)
-        st.dataframe(results_df.set_index('Category'), use_container_width=True)
-        
-        if st.session_state.final_fig:
-            plot_title_for_filename = res.get('plot_title', f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit")
-            fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
-            fn += ".svg"
-            
-            img_buffer = io.BytesIO()
-            st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
-            img_buffer.seek(0)
-            
-            st.download_button(
-                label="Download Plot as SVG",
-                data=img_buffer,
-                file_name=fn,
-                mime="image/svg+xml"
-            )
 
 # --- Footer ---
 st.markdown("---")
