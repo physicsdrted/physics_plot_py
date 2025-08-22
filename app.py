@@ -300,10 +300,6 @@ def perform_the_autofit(initial_guesses):
         st.session_state.final_fig = None
         return False
 
-# ##################################################################
-# ############# BEGINNING OF MODIFIED CODE BLOCK ###################
-# ##################################################################
-
 def parse_data_string(data_str: str) -> list[float]:
     """Cleans and parses a string of numbers separated by spaces, commas, or tabs."""
     if not isinstance(data_str, str): return []
@@ -491,7 +487,16 @@ with tab2:
                 st.session_state.fit_results = None; st.session_state.final_fig = None; st.session_state.show_guess_stage = False
                 st.session_state.processed_eq_string = None; st.session_state.params = []; st.session_state.fit_func = None
                 st.session_state.legend_label_str = ""; st.session_state.plot_title_input = ""; st.session_state.last_eq_input = ""
-                keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]; [del st.session_state[key] for key in keys_to_remove]
+                
+                # ##################################################################
+                # ############# BEGINNING OF CORRECTED CODE BLOCK ##################
+                # ##################################################################
+                keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+                for key in keys_to_remove:
+                    del st.session_state[key]
+                # ##################################################################
+                # ############### END OF CORRECTED CODE BLOCK ######################
+                # ##################################################################
 
                 df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
 
@@ -507,11 +512,6 @@ with tab2:
             st.error(f"Input Error: {e}")
         except Exception as e:
             st.error(f"An unexpected error occurred: {e}")
-
-# ##################################################################
-# ############### END OF MODIFIED CODE BLOCK #######################
-# ##################################################################
-
 
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
