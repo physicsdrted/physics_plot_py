@@ -783,29 +783,25 @@ if st.session_state.data_loaded:
         else:
             st.warning("Final plot figure not found in session state.")
 
-        # --- NEW: Axis Control UI ---
+        # --- Axis Control UI ---
         st.markdown("---")
         st.markdown("##### Adjust Plot Axes")
 
-        # Callback to handle origin checkbox logic
         def handle_origin_toggle():
-            if st.session_state.include_origin:
+            if st.session_state.include_origin_checkbox:
                 auto_x = st.session_state.auto_limits['x']
                 auto_y = st.session_state.auto_limits['y']
                 st.session_state.xlim_current = (min(0, auto_x[0]), max(0, auto_x[1]))
                 st.session_state.ylim_current = (min(0, auto_y[0]), max(0, auto_y[1]))
             else:
-                # If unchecked, revert to the last manually set limits or auto if none
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
-
-            # Trigger a plot update
+            
             new_fig, _, _ = recreate_final_figure(xlim=st.session_state.xlim_current, ylim=st.session_state.ylim_current)
             st.session_state.final_fig = new_fig
+
+        st.checkbox("Include Origin (0,0)", key='include_origin_checkbox', on_change=handle_origin_toggle)
         
-        st.checkbox("Include Origin (0,0)", key='include_origin', on_change=handle_origin_toggle)
-        
-        # UI for precise number inputs
         c1, c2 = st.columns(2)
         with c1:
             xmin = st.number_input("X-Min", value=st.session_state.xlim_current[0], step=None, format="%.3g", key="num_xmin")
@@ -814,19 +810,16 @@ if st.session_state.data_loaded:
             xmax = st.number_input("X-Max", value=st.session_state.xlim_current[1], step=None, format="%.3g", key="num_xmax")
             ymax = st.number_input("Y-Max", value=st.session_state.ylim_current[1], step=None, format="%.3g", key="num_ymax")
 
-        # UI for buttons
-        b1, b2, b3 = st.columns([1,1,2])
+        b1, b2 = st.columns(2)
         with b1:
-            if st.button("Update Plot", use_container_width=True):
+            if st.button("Update Plot with Manual Range", use_container_width=True):
                 st.session_state.xlim_current = (xmin, xmax)
                 st.session_state.ylim_current = (ymin, ymax)
-                st.session_state.include_origin = False # Manual update overrides origin toggle
                 new_fig, _, _ = recreate_final_figure(xlim=(xmin, xmax), ylim=(ymin, ymax))
                 st.session_state.final_fig = new_fig
                 st.rerun()
         with b2:
-            if st.button("Reset to Auto", use_container_width=True):
-                st.session_state.include_origin = False
+            if st.button("Reset to Auto Range", use_container_width=True):
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
                 new_fig, _, _ = recreate_final_figure()
@@ -834,38 +827,43 @@ if st.session_state.data_loaded:
                 st.rerun()
 
         st.markdown("---")
-        # --- END: Axis Control UI ---
+        
+        # --- Final Actions Section ---
+        f1, f2 = st.columns(2)
+        with f1:
+            # Prepare and show the download button
+            if st.session_state.final_fig:
+                try:
+                    user_title = st.session_state.plot_title_input.strip()
+                    default_title = f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit"
+                    plot_title_for_filename = user_title or default_title
+                    fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
+                    fn += ".svg"
+                    img_buffer = io.BytesIO()
+                    st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
+                    img_buffer.seek(0)
+                    st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml", use_container_width=True)
+                except Exception as dl_err:
+                     st.warning(f"Could not prepare plot for download: {dl_err}")
 
-        if st.session_state.final_fig:
-            try:
-                user_title = st.session_state.plot_title_input.strip()
-                default_title = f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit"
-                plot_title_for_filename = user_title or default_title
-                fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
-                fn += ".svg"
-                img_buffer = io.BytesIO()
-                st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
-                img_buffer.seek(0)
-                st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml")
-            except Exception as dl_err:
-                 st.warning(f"Could not prepare plot for download: {dl_err}")
-
-        if st.button("Define New Fit"):
-            # Clean up axis control state variables
-            for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin']:
-                if key in st.session_state:
-                    del st.session_state[key]
-            
-            st.session_state.show_guess_stage = False
-            st.session_state.fit_results = None
-            st.session_state.final_fig = None
-            st.session_state.processed_eq_string = None
-            st.session_state.params = []
-            st.session_state.fit_func = None
-            for key in list(st.session_state.keys()):
-                 if key.startswith("init_guess_"):
-                     del st.session_state[key]
-            st.rerun()
+        with f2:
+            # Show the "Define New Fit" button
+            if st.button("Define New Fit", use_container_width=True):
+                # Clean up axis control state variables
+                for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                st.session_state.show_guess_stage = False
+                st.session_state.fit_results = None
+                st.session_state.final_fig = None
+                st.session_state.processed_eq_string = None
+                st.session_state.params = []
+                st.session_state.fit_func = None
+                for key in list(st.session_state.keys()):
+                     if key.startswith("init_guess_"):
+                         del st.session_state[key]
+                st.rerun()
 
 # --- Footer ---
 st.markdown("---")
