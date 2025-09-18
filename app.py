@@ -743,15 +743,15 @@ if st.session_state.data_loaded:
         else:
             st.warning("Final plot figure not found in session state.")
 
-        st.markdown("##### Fit Statistics")
-        table_rows = [
-            ("**Equation**", f"`y = {res['eq_string']}`"),
-            ("**Chi-squared (χ²)**", format_value_uncertainty(res['chi2'], res['chi2_err'])),
-            ("**Degrees of Freedom (DoF)**", f"{res['dof']}")
-        ]
-
-        markdown_table = "| Category | Value |\n|---:|:---| \n" + "\n".join(f"| {cat} | {val} |" for cat, val in table_rows)
-        st.markdown(markdown_table)
+        # This is the section that was removed
+        # st.markdown("##### Fit Statistics")
+        # table_rows = [
+        #     ("**Equation**", f"`y = {res['eq_string']}`"),
+        #     ("**Chi-squared (χ²)**", format_value_uncertainty(res['chi2'], res['chi2_err'])),
+        #     ("**Degrees of Freedom (DoF)**", f"{res['dof']}")
+        # ]
+        # markdown_table = "| Category | Value |\n|---:|:---| \n" + "\n".join(f"| {cat} | {val} |" for cat, val in table_rows)
+        # st.markdown(markdown_table)
 
         if st.session_state.final_fig:
             try:
@@ -781,4 +781,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 8/22/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 9/18/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
