@@ -529,22 +529,24 @@ if st.session_state.data_loaded:
         st.dataframe(st.session_state.df_head, use_container_width=True)
         st.markdown("---")
 
-    st.subheader("Initial Data Plot")
-    try:
-        fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
-        ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
-        ax_initial.set_xlabel(st.session_state.x_axis_label)
-        ax_initial.set_ylabel(st.session_state.y_axis_label)
-        ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
-        ax_initial.grid(True, linestyle=':', alpha=0.7)
-        ax_initial.legend()
-        plt.tight_layout()
-        st.pyplot(fig_initial)
-        plt.close(fig_initial)
-    except Exception as plot_err:
-        st.error(f"Error generating initial plot: {plot_err}")
+    # Only show the initial plot if a fit has NOT been performed yet
+    if not st.session_state.fit_results:
+        st.subheader("Initial Data Plot")
+        try:
+            fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
+            ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
+            ax_initial.set_xlabel(st.session_state.x_axis_label)
+            ax_initial.set_ylabel(st.session_state.y_axis_label)
+            ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
+            ax_initial.grid(True, linestyle=':', alpha=0.7)
+            ax_initial.legend()
+            plt.tight_layout()
+            st.pyplot(fig_initial)
+            plt.close(fig_initial)
+        except Exception as plot_err:
+            st.error(f"Error generating initial plot: {plot_err}")
 
-    st.markdown("---")
+        st.markdown("---")
 
     if not st.session_state.show_guess_stage and not st.session_state.fit_results:
         st.subheader("Step 1: Enter Fit Details")
@@ -743,16 +745,6 @@ if st.session_state.data_loaded:
         else:
             st.warning("Final plot figure not found in session state.")
 
-        # This is the section that was removed
-        # st.markdown("##### Fit Statistics")
-        # table_rows = [
-        #     ("**Equation**", f"`y = {res['eq_string']}`"),
-        #     ("**Chi-squared (χ²)**", format_value_uncertainty(res['chi2'], res['chi2_err'])),
-        #     ("**Degrees of Freedom (DoF)**", f"{res['dof']}")
-        # ]
-        # markdown_table = "| Category | Value |\n|---:|:---| \n" + "\n".join(f"| {cat} | {val} |" for cat, val in table_rows)
-        # st.markdown(markdown_table)
-
         if st.session_state.final_fig:
             try:
                 user_title = st.session_state.plot_title_input.strip()
@@ -781,4 +773,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 9/18/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 9/22/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
