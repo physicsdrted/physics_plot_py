@@ -13,6 +13,21 @@ from matplotlib.gridspec import GridSpec
 # --- Configuration ---
 st.set_page_config(page_title="Physics Plot", layout="wide")
 
+# --- A SIMPLER, SAFER CSS APPROACH ---
+# This CSS directly targets the plot's image tag and gives it a max-height.
+# The !important tag helps ensure this rule is not overridden by Streamlit's defaults.
+# This method will NOT break the page layout.
+st.markdown("""
+<style>
+[data-testid="stImage"] > img {
+    max-height: 85vh !important;
+    width: auto !important;
+    margin: auto;
+}
+</style>
+""", unsafe_allow_html=True)
+# --- END CSS ---
+
 # Set your desired aspect ratio here. The CSS will respect it.
 FIG_WIDTH = 7.5
 FIG_HEIGHT = 8
