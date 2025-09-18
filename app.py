@@ -18,7 +18,7 @@ st.markdown("""
 /* This targets the container of the Matplotlib plot */
 [data-testid="stArrowPlot"] {
     /* Set a maximum height as a percentage of the viewport height */
-    max-height: 80vh;
+    max-height: 70vh;
     /* Allow the width to adjust automatically to maintain aspect ratio */
     width: auto !important;
     /* Center the plot horizontally */
