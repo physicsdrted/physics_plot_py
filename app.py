@@ -14,7 +14,7 @@ from matplotlib.gridspec import GridSpec
 st.set_page_config(page_title="Physics Plot", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 FIG_WIDTH = 6
-FIG_HEIGHT = 5
+FIG_HEIGHT = 3
 plt.rcParams['figure.figsize'] = [FIG_WIDTH, FIG_HEIGHT]
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
