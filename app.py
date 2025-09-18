@@ -74,7 +74,7 @@ def format_value_uncertainty(value, uncertainty):
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
     eq_string = eq_string.strip()
-    # --- NEW: Gracefully handle "y =" at the start of the equation ---
+    # Gracefully handle "y =" at the start of the equation
     eq_string = re.sub(r'^\s*y\s*=\s*', '', eq_string, flags=re.IGNORECASE).strip()
     
     if not eq_string: raise ValueError("Equation cannot be empty.")
@@ -211,8 +211,8 @@ def recreate_final_figure(xlim=None, ylim=None):
     stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
     stats_label = "\n".join(stats_parts)
 
-    # Recreate the figure
-    fig = plt.figure(figsize=(10, 9.8))
+    # MODIFIED: Changed figsize for better aspect ratio on widescreen displays
+    fig = plt.figure(figsize=(10, 6))
     gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
     ax0 = fig.add_subplot(gs[0])
     ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
@@ -526,6 +526,10 @@ with tab2:
             
             # Step 3: Data is valid. Unconditionally reset the application state.
             st.info("Processing manual data...")
+            
+            # --- BUG FIX: Clear the file_uploader state to prevent re-uploading old CSV data ---
+            st.session_state.file_uploader = None
+            
             st.session_state.fit_results = None
             st.session_state.final_fig = None
             st.session_state.show_guess_stage = False
@@ -574,6 +578,7 @@ if st.session_state.data_loaded:
     if not st.session_state.fit_results:
         st.subheader("Initial Data Plot")
         try:
+            # MODIFIED: Changed figsize for better aspect ratio
             fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
             ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
             ax_initial.set_xlabel(st.session_state.x_axis_label)
@@ -721,7 +726,8 @@ if st.session_state.data_loaded:
             y_preview_curve = fit_func(x_preview_curve, *current_guess_values)
 
             # --- Create a two-panel plot (main + residuals) ---
-            fig_preview = plt.figure(figsize=(10, 8))
+            # MODIFIED: Changed figsize for better aspect ratio
+            fig_preview = plt.figure(figsize=(10, 6))
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
 
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
