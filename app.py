@@ -186,6 +186,71 @@ def format_equation_mathtext(eq_string_orig):
     formatted_final = re.sub(r'\s{2,}', ' ', formatted_final)
     return formatted_final
 
+def recreate_final_figure(xlim=None, ylim=None):
+    """
+    Regenerates the final plot figure using data stored in session_state.
+    Allows for custom axis limits to be applied.
+    """
+    res = st.session_state.fit_results
+    fit_func = st.session_state.fit_func
+    x_data = st.session_state.x_data
+    y_data = st.session_state.y_data
+    x_err_safe = st.session_state.x_err_safe
+    y_err_safe = st.session_state.y_err_safe
+
+    # Recreate the labels
+    equation_label = st.session_state.legend_label_str
+    stats_parts = []
+    for i, p_name in enumerate(res['params']):
+        param_str = format_value_uncertainty(res['popt'][i], res['perr'][i])
+        stats_parts.append(f"${p_name} = {param_str.replace('$', '')}$")
+    red_chi2_str = format_value_uncertainty(res['red_chi2'], res['red_chi2_err'])
+    stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
+    stats_label = "\n".join(stats_parts)
+
+    # Recreate the figure
+    fig = plt.figure(figsize=(10, 9.8))
+    gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+    ax0 = fig.add_subplot(gs[0])
+    ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+    
+    # Generate fit curve based on data range or specified xlim
+    x_min_plot = xlim[0] if xlim else np.min(x_data)
+    x_max_plot = xlim[1] if xlim else np.max(x_data)
+    x_fit_curve = np.linspace(x_min_plot, x_max_plot, 400)
+    y_fit_curve = fit_func(x_fit_curve, *res['popt'])
+    
+    ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
+    ax0.plot([], [], ' ', label=stats_label)
+
+    user_title_str = st.session_state.plot_title_input.strip()
+    final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
+    ax0.set_ylabel(st.session_state.y_axis_label)
+    ax0.set_title(final_plot_title)
+    ax0.legend(loc='best', fontsize='large')
+    ax0.grid(True, linestyle=':', alpha=0.6)
+    ax0.tick_params(axis='x', labelbottom=False)
+    ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
+
+    # Set custom axis limits if provided
+    if xlim: ax0.set_xlim(xlim)
+    if ylim: ax0.set_ylim(ylim)
+
+    ax1 = fig.add_subplot(gs[1], sharex=ax0)
+    ax1.errorbar(x_data, res['residuals_final'], yerr=res['total_err_final'], fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+    ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
+    ax1.set_xlabel(st.session_state.x_axis_label)
+    ax1.set_ylabel("Residuals")
+    ax1.grid(True, linestyle=':', alpha=0.6)
+    
+    # Ensure residual plot ylim is symmetrical and reasonable
+    max_resid_err = np.max(np.abs(res['residuals_final']) + res['total_err_final'])
+    ax1.set_ylim(-max_resid_err * 1.1, max_resid_err * 1.1)
+    
+    fig.tight_layout(pad=1.0)
+    
+    return fig, ax0.get_xlim(), ax0.get_ylim()
+
 def perform_the_autofit(initial_guesses):
     """
     Takes a list of initial guesses, performs the iterative curve fit,
@@ -256,42 +321,16 @@ def perform_the_autofit(initial_guesses):
                 "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final, "total_err_final": total_err_final
             }
 
-            equation_label = st.session_state.legend_label_str
-            stats_parts = []
-            for i, p_name in enumerate(params):
-                param_str = format_value_uncertainty(popt_final[i], perr_final[i])
-                stats_parts.append(f"${p_name} = {param_str.replace('$', '')}$")
-            red_chi2_str = format_value_uncertainty(chi_squared_red, red_chi_squared_err)
-            stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
-            stats_label = "\n".join(stats_parts)
-
-            fig = plt.figure(figsize=(10, 9.8))
-            gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-            ax0 = fig.add_subplot(gs[0])
-            ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-            x_fit_curve = np.linspace(np.min(x_data), np.max(x_data), 200)
-            y_fit_curve = fit_func(x_fit_curve, *popt_final)
-            ax0.plot(x_fit_curve, y_fit_curve, '-', label=equation_label, zorder=10, linewidth=1.5)
-            ax0.plot([], [], ' ', label=stats_label)
-
-            user_title_str = st.session_state.plot_title_input.strip()
-            final_plot_title = user_title_str if user_title_str else f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
-            ax0.set_ylabel(st.session_state.y_axis_label)
-            ax0.set_title(final_plot_title)
-            ax0.legend(loc='best', fontsize='large')
-            ax0.grid(True, linestyle=':', alpha=0.6)
-            ax0.tick_params(axis='x', labelbottom=False)
-            ax0.text(0.5, 0.5, 'physicsplot.com', transform=ax0.transAxes, fontsize=40, color='lightgrey', alpha=0.4, ha='center', va='center', rotation=30, zorder=0)
-
-            ax1 = fig.add_subplot(gs[1], sharex=ax0)
-            ax1.errorbar(x_data, residuals_final, yerr=total_err_final, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-            ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
-            ax1.set_xlabel(st.session_state.x_axis_label)
-            ax1.set_ylabel("Residuals")
-            ax1.grid(True, linestyle=':', alpha=0.6)
-            fig.tight_layout(pad=1.0)
+            # Generate the initial plot and store it along with auto-calculated axis limits
+            fig, xlim_auto, ylim_auto = recreate_final_figure()
             st.session_state.final_fig = fig
-
+            st.session_state.auto_limits = {'x': xlim_auto, 'y': ylim_auto}
+            
+            # Initialize states for the axis control UI
+            st.session_state.xlim_current = xlim_auto
+            st.session_state.ylim_current = ylim_auto
+            st.session_state.include_origin = False
+            
             return True
 
     except Exception as e:
@@ -737,13 +776,65 @@ if st.session_state.data_loaded:
 
     elif st.session_state.fit_results:
         st.subheader("Step 3: Fit Results")
-        res = st.session_state.fit_results
-
+        
         if st.session_state.final_fig:
             st.pyplot(st.session_state.final_fig)
             plt.close(st.session_state.final_fig)
         else:
             st.warning("Final plot figure not found in session state.")
+
+        # --- NEW: Axis Control UI ---
+        st.markdown("---")
+        st.markdown("##### Adjust Plot Axes")
+
+        # Callback to handle origin checkbox logic
+        def handle_origin_toggle():
+            if st.session_state.include_origin:
+                auto_x = st.session_state.auto_limits['x']
+                auto_y = st.session_state.auto_limits['y']
+                st.session_state.xlim_current = (min(0, auto_x[0]), max(0, auto_x[1]))
+                st.session_state.ylim_current = (min(0, auto_y[0]), max(0, auto_y[1]))
+            else:
+                # If unchecked, revert to the last manually set limits or auto if none
+                st.session_state.xlim_current = st.session_state.auto_limits['x']
+                st.session_state.ylim_current = st.session_state.auto_limits['y']
+
+            # Trigger a plot update
+            new_fig, _, _ = recreate_final_figure(xlim=st.session_state.xlim_current, ylim=st.session_state.ylim_current)
+            st.session_state.final_fig = new_fig
+        
+        st.checkbox("Include Origin (0,0)", key='include_origin', on_change=handle_origin_toggle)
+        
+        # UI for precise number inputs
+        c1, c2 = st.columns(2)
+        with c1:
+            xmin = st.number_input("X-Min", value=st.session_state.xlim_current[0], step=None, format="%.3g", key="num_xmin")
+            ymin = st.number_input("Y-Min", value=st.session_state.ylim_current[0], step=None, format="%.3g", key="num_ymin")
+        with c2:
+            xmax = st.number_input("X-Max", value=st.session_state.xlim_current[1], step=None, format="%.3g", key="num_xmax")
+            ymax = st.number_input("Y-Max", value=st.session_state.ylim_current[1], step=None, format="%.3g", key="num_ymax")
+
+        # UI for buttons
+        b1, b2, b3 = st.columns([1,1,2])
+        with b1:
+            if st.button("Update Plot", use_container_width=True):
+                st.session_state.xlim_current = (xmin, xmax)
+                st.session_state.ylim_current = (ymin, ymax)
+                st.session_state.include_origin = False # Manual update overrides origin toggle
+                new_fig, _, _ = recreate_final_figure(xlim=(xmin, xmax), ylim=(ymin, ymax))
+                st.session_state.final_fig = new_fig
+                st.rerun()
+        with b2:
+            if st.button("Reset to Auto", use_container_width=True):
+                st.session_state.include_origin = False
+                st.session_state.xlim_current = st.session_state.auto_limits['x']
+                st.session_state.ylim_current = st.session_state.auto_limits['y']
+                new_fig, _, _ = recreate_final_figure()
+                st.session_state.final_fig = new_fig
+                st.rerun()
+
+        st.markdown("---")
+        # --- END: Axis Control UI ---
 
         if st.session_state.final_fig:
             try:
@@ -760,6 +851,11 @@ if st.session_state.data_loaded:
                  st.warning(f"Could not prepare plot for download: {dl_err}")
 
         if st.button("Define New Fit"):
+            # Clean up axis control state variables
+            for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
             st.session_state.show_guess_stage = False
             st.session_state.fit_results = None
             st.session_state.final_fig = None
@@ -773,4 +869,4 @@ if st.session_state.data_loaded:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 9/22/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 8/22/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
