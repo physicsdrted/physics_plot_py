@@ -73,7 +73,10 @@ def format_value_uncertainty(value, uncertainty):
 
 def validate_and_parse_equation(eq_string):
     """Validates equation, finds 'x' and parameters (A-Z)."""
-    eq_string = eq_string.strip();
+    eq_string = eq_string.strip()
+    # --- NEW: Gracefully handle "y =" at the start of the equation ---
+    eq_string = re.sub(r'^\s*y\s*=\s*', '', eq_string, flags=re.IGNORECASE).strip()
+    
     if not eq_string: raise ValueError("Equation cannot be empty.")
     eq_string = eq_string.replace('^', '**') # Keep internal representation with **
     if not re.match(ALLOWED_CHARS, eq_string): invalid_chars = "".join(sorted(list(set(re.sub(ALLOWED_CHARS, '', eq_string))))); raise ValueError(f"Invalid chars: '{invalid_chars}'.")
@@ -329,7 +332,6 @@ def perform_the_autofit(initial_guesses):
             # Initialize states for the axis control UI
             st.session_state.xlim_current = xlim_auto
             st.session_state.ylim_current = ylim_auto
-            st.session_state.include_origin = False
             
             return True
 
@@ -788,15 +790,19 @@ if st.session_state.data_loaded:
         st.markdown("##### Adjust Plot Axes")
 
         def handle_origin_toggle():
+            # This function is triggered when the checkbox state changes
             if st.session_state.include_origin_checkbox:
+                # If checkbox is now ticked, calculate new limits including origin
                 auto_x = st.session_state.auto_limits['x']
                 auto_y = st.session_state.auto_limits['y']
                 st.session_state.xlim_current = (min(0, auto_x[0]), max(0, auto_x[1]))
                 st.session_state.ylim_current = (min(0, auto_y[0]), max(0, auto_y[1]))
             else:
+                # If checkbox is now unticked, revert to the original auto limits
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
             
+            # Regenerate the figure with the new limits
             new_fig, _, _ = recreate_final_figure(xlim=st.session_state.xlim_current, ylim=st.session_state.ylim_current)
             st.session_state.final_fig = new_fig
 
@@ -817,14 +823,16 @@ if st.session_state.data_loaded:
                 st.session_state.ylim_current = (ymin, ymax)
                 new_fig, _, _ = recreate_final_figure(xlim=(xmin, xmax), ylim=(ymin, ymax))
                 st.session_state.final_fig = new_fig
-                st.rerun()
+                st.rerun() # Rerun to reflect the changes
         with b2:
             if st.button("Reset to Auto Range", use_container_width=True):
+                # Reset limits in state and untick the origin checkbox
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
+                st.session_state.include_origin_checkbox = False 
                 new_fig, _, _ = recreate_final_figure()
                 st.session_state.final_fig = new_fig
-                st.rerun()
+                st.rerun() # Rerun to apply reset
 
         st.markdown("---")
         
@@ -848,7 +856,7 @@ if st.session_state.data_loaded:
 
         with f2:
             # Show the "Define New Fit" button
-            if st.button("Define New Fit", use_container_width=True):
+            if st.button("Define New Fit", use_container_width=True, type="primary"):
                 # Clean up axis control state variables
                 for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox']:
                     if key in st.session_state:
