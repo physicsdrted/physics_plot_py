@@ -12,10 +12,27 @@ from matplotlib.gridspec import GridSpec
 
 # --- Configuration ---
 st.set_page_config(page_title="Physics Plot", layout="wide")
-# <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
+# --- NEW: CSS to control plot height and maintain aspect ratio ---
+st.markdown("""
+<style>
+/* This targets the container of the Matplotlib plot */
+[data-testid="stArrowPlot"] {
+    /* Set a maximum height as a percentage of the viewport height */
+    max-height: 80vh;
+    /* Allow the width to adjust automatically to maintain aspect ratio */
+    width: auto !important;
+    /* Center the plot horizontally */
+    margin: auto;
+}
+</style>
+""", unsafe_allow_html=True)
+# --- END NEW ---
+
 FIG_WIDTH = 7.5
 FIG_HEIGHT = 8
 plt.rcParams['figure.figsize'] = [FIG_WIDTH, FIG_HEIGHT]
+
+# <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 # tell MatPlotLib to use larger fonts for the title and axis labels
