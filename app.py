@@ -12,22 +12,35 @@ from matplotlib.gridspec import GridSpec
 
 # --- Configuration ---
 st.set_page_config(page_title="Physics Plot", layout="wide")
-# --- NEW: CSS to control plot height and maintain aspect ratio ---
+
+# --- CORRECTED CSS to control plot height and maintain aspect ratio ---
 st.markdown("""
 <style>
-/* This targets the container of the Matplotlib plot */
-[data-testid="stArrowPlot"] {
-    /* Set a maximum height as a percentage of the viewport height */
-    max-height: 70vh;
-    /* Allow the width to adjust automatically to maintain aspect ratio */
+/* This targets the container holding the Streamlit image */
+[data-testid="stImage"] {
+    /* Set the container to a specific height */
+    height: 85vh;
+}
+
+/* This targets the image itself within the container */
+[data-testid="stImage"] img {
+    /* This is the key property. It tells the image to scale down
+       to fit within its container's height, maintaining its aspect ratio. */
+    object-fit: contain;
+    
+    /* Ensure the height of the image fills the container's height */
+    height: 100% !important;
+    /* Let the width adjust automatically */
     width: auto !important;
+    
     /* Center the plot horizontally */
     margin: auto;
 }
 </style>
 """, unsafe_allow_html=True)
-# --- END NEW ---
+# --- END CORRECTED CSS ---
 
+# Set your desired aspect ratio here. The CSS will respect it.
 FIG_WIDTH = 7.5
 FIG_HEIGHT = 8
 plt.rcParams['figure.figsize'] = [FIG_WIDTH, FIG_HEIGHT]
