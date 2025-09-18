@@ -13,6 +13,9 @@ from matplotlib.gridspec import GridSpec
 # --- Configuration ---
 st.set_page_config(page_title="Physics Plot", layout="wide")
 # <<< Tell Matplotlib to use STIX fonts for better mathtext rendering >>>
+FIG_WIDTH = 6
+FIG_HEIGHT = 5
+plt.rcParams['figure.figsize'] = [FIG_WIDTH, FIG_HEIGHT]
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 # tell MatPlotLib to use larger fonts for the title and axis labels
@@ -211,8 +214,7 @@ def recreate_final_figure(xlim=None, ylim=None):
     stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str.replace('$', '')}$")
     stats_label = "\n".join(stats_parts)
 
-    # Changed figsize for better aspect ratio on widescreen displays
-    fig = plt.figure(figsize=(10, 6))
+    fig = plt.figure()
     gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
     ax0 = fig.add_subplot(gs[0])
     ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
@@ -584,8 +586,7 @@ if st.session_state.data_loaded:
     if not st.session_state.fit_results:
         st.subheader("Initial Data Plot")
         try:
-            # Changed figsize for better aspect ratio
-            fig_initial, ax_initial = plt.subplots(figsize=(10, 6))
+            fig_initial, ax_initial = plt.subplots()
             ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
             ax_initial.set_xlabel(st.session_state.x_axis_label)
             ax_initial.set_ylabel(st.session_state.y_axis_label)
@@ -732,8 +733,7 @@ if st.session_state.data_loaded:
             y_preview_curve = fit_func(x_preview_curve, *current_guess_values)
 
             # --- Create a two-panel plot (main + residuals) ---
-            # Changed figsize for better aspect ratio
-            fig_preview = plt.figure(figsize=(10, 6))
+            fig_preview = plt.figure()
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
 
             ax0_preview = fig_preview.add_subplot(gs_preview[0])
