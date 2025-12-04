@@ -197,17 +197,21 @@ def format_equation_mathtext(eq_string_orig):
 
 def recreate_final_figure(xlim=None, ylim=None):
     """
-    Regenerates the final plot figure using data stored in session_state.
-    Allows for custom axis limits to be applied.
+    Regenerates the final plot, distinguishing between included and excluded points.
     """
     res = st.session_state.fit_results
     fit_func = st.session_state.fit_func
-    x_data = st.session_state.x_data
-    y_data = st.session_state.y_data
-    x_err_safe = st.session_state.x_err_safe
-    y_err_safe = st.session_state.y_err_safe
+    
+    # Get the full dataset and the inclusion mask from the session state DataFrame
+    full_df = st.session_state.data_df
+    include_mask = full_df['Include in Fit'].astype(bool)
+    
+    x_data_full = full_df['X'].to_numpy()
+    y_data_full = full_df['Y'].to_numpy()
+    x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
+    y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
 
-    # Recreate the labels
+    # Create labels for the legend
     equation_label = st.session_state.legend_label_str
     stats_parts = []
     for i, p_name in enumerate(res['params']):
@@ -220,11 +224,22 @@ def recreate_final_figure(xlim=None, ylim=None):
     fig = plt.figure()
     gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
     ax0 = fig.add_subplot(gs[0])
-    ax0.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+
+    # Plot INCLUDED data points (solid markers)
+    ax0.errorbar(x_data_full[include_mask], y_data_full[include_mask], 
+                 yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], 
+                 fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5)
     
-    # Generate fit curve based on data range or specified xlim
-    x_min_plot = xlim[0] if xlim else np.min(x_data)
-    x_max_plot = xlim[1] if xlim else np.max(x_data)
+    # Plot EXCLUDED data points (hollow markers) if any exist
+    if np.sum(~include_mask) > 0:
+        ax0.errorbar(x_data_full[~include_mask], y_data_full[~include_mask], 
+                     yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask],
+                     fmt='o', markerfacecolor='none', markeredgecolor='gray', markersize=4,
+                     linestyle='None', capsize=3, label='Excluded Data', ecolor='gray', zorder=4)
+
+    # Generate fit curve based on the full data range or specified xlim
+    x_min_plot = xlim[0] if xlim else np.min(x_data_full)
+    x_max_plot = xlim[1] if xlim else np.max(x_data_full)
     x_fit_curve = np.linspace(x_min_plot, x_max_plot, 400)
     y_fit_curve = fit_func(x_fit_curve, *res['popt'])
     
@@ -245,13 +260,13 @@ def recreate_final_figure(xlim=None, ylim=None):
     if ylim: ax0.set_ylim(ylim)
 
     ax1 = fig.add_subplot(gs[1], sharex=ax0)
-    ax1.errorbar(x_data, res['residuals_final'], yerr=res['total_err_final'], fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+    # The residuals are only calculated for INCLUDED points.
+    ax1.errorbar(res['x_data_for_residuals'], res['residuals_final'], yerr=res['total_err_final'], fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
     ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
     ax1.set_xlabel(st.session_state.x_axis_label)
     ax1.set_ylabel("Residuals")
     ax1.grid(True, linestyle=':', alpha=0.6)
     
-    # Ensure residual plot ylim is symmetrical and reasonable
     max_resid_err = np.max(np.abs(res['residuals_final']) + res['total_err_final'])
     ax1.set_ylim(-max_resid_err * 1.1, max_resid_err * 1.1)
     
@@ -261,22 +276,29 @@ def recreate_final_figure(xlim=None, ylim=None):
 
 def perform_the_autofit(initial_guesses):
     """
-    Takes a list of initial guesses, performs the iterative curve fit,
-    and stores results in the session state.
-    Returns True on success, False on failure.
+    Performs the iterative curve fit using only the INCLUDED data points.
     """
     try:
         with st.spinner("Performing iterative fit... Please wait."):
             fit_func = st.session_state.fit_func
             params = st.session_state.params
-            x_data = st.session_state.x_data
-            y_data = st.session_state.y_data
-            x_err_safe = st.session_state.x_err_safe
-            y_err_safe = st.session_state.y_err_safe
+            
+            # MODIFICATION: Filter data based on the 'Include in Fit' column
+            full_df = st.session_state.data_df
+            include_mask = full_df['Include in Fit'].astype(bool)
+            
+            if np.sum(include_mask) <= len(params):
+                st.error(f"Fit failed: You have selected {np.sum(include_mask)} data points, but the model has {len(params)} parameters. You must include more points than parameters.")
+                return False
+
+            x_data_fit = full_df['X'][include_mask].to_numpy()
+            y_data_fit = full_df['Y'][include_mask].to_numpy()
+            x_err_fit = safeguard_errors(np.abs(full_df['X_Err'][include_mask].to_numpy()))
+            y_err_fit = safeguard_errors(np.abs(full_df['Y_Err'][include_mask].to_numpy()))
 
             popt_current = list(initial_guesses)
             pcov_current = None
-            total_err_current = y_err_safe.copy()
+            total_err_current = y_err_fit.copy()
 
             max_iterations = 4
             for i in range(max_iterations):
@@ -289,54 +311,45 @@ def perform_the_autofit(initial_guesses):
 
                 try:
                     popt_current, pcov_current = curve_fit(
-                        fit_func, x_data, y_data, sigma=sigma_to_use, p0=popt_current,
+                        fit_func, x_data_fit, y_data_fit, sigma=sigma_to_use, p0=popt_current,
                         absolute_sigma=True, maxfev=8000, check_finite=(True, True)
                     )
-                    if not np.all(np.isfinite(popt_current)):
-                        raise RuntimeError("Fit resulted in non-finite parameters.")
-                    if pcov_current is None or not np.all(np.isfinite(np.diag(pcov_current))) or np.any(np.diag(pcov_current) < 0):
-                        if pcov_current is None: pcov_current = np.full((len(params), len(params)), np.inf)
-
                 except RuntimeError as fit_error:
                     raise RuntimeError(f"Fit failed to converge: {fit_error}") from fit_error
+                
+                # Further checks for fit validity
+                if not np.all(np.isfinite(popt_current)) or pcov_current is None or not np.all(np.isfinite(np.diag(pcov_current))) or np.any(np.diag(pcov_current) < 0):
+                     raise RuntimeError("Fit resulted in non-finite parameters or invalid covariance matrix.")
 
                 if i < max_iterations - 1:
-                    slopes = numerical_derivative(fit_func, x_data, popt_current)
-                    if np.all(np.isfinite(slopes)):
-                        total_err_sq = y_err_safe**2 + (slopes * x_err_safe)**2
-                        total_err_current = safeguard_errors(np.sqrt(total_err_sq))
-                    else:
-                        total_err_current = y_err_safe.copy()
+                    slopes = numerical_derivative(fit_func, x_data_fit, popt_current)
+                    total_err_sq = y_err_fit**2 + (slopes * x_err_fit)**2
+                    total_err_current = safeguard_errors(np.sqrt(total_err_sq))
 
-            popt_final = popt_current
-            pcov_final = pcov_current
-            total_err_final = sigma_to_use if sigma_to_use is not None else np.ones_like(y_data)
-            diag_pcov = np.diag(pcov_final)
-            perr_final = np.sqrt(diag_pcov) if not np.any(diag_pcov < 0) else np.full(len(popt_final), np.nan)
-            residuals_final = y_data - fit_func(x_data, *popt_final)
-            dof = len(y_data) - len(popt_final)
+            popt_final, pcov_final = popt_current, pcov_current
+            total_err_final = total_err_current
+            perr_final = np.sqrt(np.diag(pcov_final))
+            residuals_final = y_data_fit - fit_func(x_data_fit, *popt_final)
+            dof = len(y_data_fit) - len(popt_final)
+            
             if dof > 0:
                 chi_squared = np.sum((residuals_final / total_err_final)**2)
-                chi_squared_err = np.sqrt(2.0 * dof)
-                chi_squared_red = chi_squared / dof
+                red_chi_squared = chi_squared / dof
                 red_chi_squared_err = np.sqrt(2.0 / dof)
             else:
-                chi_squared, chi_squared_err, chi_squared_red, red_chi_squared_err = np.nan, np.nan, np.nan, np.nan
+                chi_squared, red_chi_squared, red_chi_squared_err = np.nan, np.nan, np.nan
 
             st.session_state.fit_results = {
-                "eq_string": st.session_state.processed_eq_string, "params": params, "popt": popt_final, "perr": perr_final,
-                "chi2": chi_squared, "chi2_err": chi_squared_err, "dof": dof, "red_chi2": chi_squared_red,
-                "red_chi2_err": red_chi_squared_err, "residuals_final": residuals_final, "total_err_final": total_err_final
+                "params": params, "popt": popt_final, "perr": perr_final, "dof": dof,
+                "red_chi2": red_chi_squared, "red_chi2_err": red_chi_squared_err,
+                "residuals_final": residuals_final, "total_err_final": total_err_final,
+                "x_data_for_residuals": x_data_fit # Store the x-data used for the fit
             }
 
-            # Generate the initial plot and store it along with auto-calculated axis limits
             fig, xlim_auto, ylim_auto = recreate_final_figure()
             st.session_state.final_fig = fig
             st.session_state.auto_limits = {'x': xlim_auto, 'y': ylim_auto}
-            
-            # Initialize states for the axis control UI
-            st.session_state.xlim_current = xlim_auto
-            st.session_state.ylim_current = ylim_auto
+            st.session_state.xlim_current, st.session_state.ylim_current = xlim_auto, ylim_auto
             
             return True
 
@@ -389,18 +402,15 @@ st.components.v1.html(custom_html)
 # Initialize session state variables
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
-    st.session_state.x_data = None
-    st.session_state.y_data = None
-    st.session_state.x_err_safe = None
-    st.session_state.y_err_safe = None
+    # MODIFICATION: Use a single DataFrame to store all data and inclusion status
+    st.session_state.data_df = None
     st.session_state.x_axis_label = "X"
     st.session_state.y_axis_label = "Y"
     st.session_state.fit_results = None
     st.session_state.final_fig = None
     st.session_state.processed_file_key = None
-    st.session_state.df_head = None
-    
-    # MODIFICATION: Add state for active tab and manual input fields
+
+    # State for the active data input tab and manual entry text
     st.session_state.active_data_tab = "Upload CSV File"
     st.session_state.manual_x_label = "time (s)"
     st.session_state.manual_y_label = "height (m)"
@@ -421,13 +431,11 @@ if 'legend_label_str' not in st.session_state:
     st.session_state.legend_label_str = ""
 if 'plot_title_input' not in st.session_state:
     st.session_state.plot_title_input = ""
-# BUG FIX: Add a counter to create new keys for the file uploader
 if 'uploader_key_counter' not in st.session_state:
     st.session_state.uploader_key_counter = 0
 
 # --- Data Input Section ---
 
-# Use st.radio to allow programmatic tab switching. Its value is read from and saved to session_state.
 selected_tab = st.radio(
     "Data Input Method",
     ["Upload CSV File", "Enter Data Manually"],
@@ -436,242 +444,182 @@ selected_tab = st.radio(
     label_visibility="collapsed"
 )
 
-# Define the logic for the "Upload CSV File" tab
 if selected_tab == "Upload CSV File":
-    
-    # Define the callback function that will handle the file upload.
-    # This function runs BEFORE the rest of the script is re-executed.
     def handle_file_upload():
         uploader_key = f"file_uploader_{st.session_state.uploader_key_counter}"
-        uploaded_file = st.session_state[uploader_key]
-        if uploaded_file is None:
-            return
+        uploaded_file = st.session_state.get(uploader_key)
+        if not uploaded_file: return
 
         current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
-        if current_file_key == st.session_state.get('processed_file_key', None):
-            return # Avoid reprocessing the same file on rerun
+        if current_file_key == st.session_state.get('processed_file_key', None): return
 
-        st.info(f"Processing new uploaded file: {uploaded_file.name}")
-        
-        # Reset the application state for a new fit
-        st.session_state.fit_results = None
-        st.session_state.final_fig = None
-        st.session_state.show_guess_stage = False
-        st.session_state.processed_eq_string = None
-        st.session_state.params = []
-        st.session_state.fit_func = None
-        st.session_state.legend_label_str = ""
-        st.session_state.plot_title_input = ""
+        # Reset application state
+        st.session_state.fit_results = None; st.session_state.final_fig = None
+        st.session_state.show_guess_stage = False; st.session_state.processed_eq_string = None
+        st.session_state.params = []; st.session_state.fit_func = None
+        st.session_state.legend_label_str = ""; st.session_state.plot_title_input = ""
         st.session_state.last_eq_input = ""
-        keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-        for key in keys_to_remove:
-            del st.session_state[key]
+        for k in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[k]
 
         try:
-            # Process the uploaded file
             raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
             if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
-                st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
-                st.session_state.data_loaded = False
-                st.session_state.processed_file_key = None
-                return
-
+                st.error("Invalid file structure."); return
+            
             x_label, y_label = str(raw_df.iloc[0, 0]), str(raw_df.iloc[0, 2])
             df = raw_df.iloc[1:].copy()
-            df.columns = ['x', 'x_err', 'y', 'y_err']
+            df.columns = ['X', 'X_Err', 'Y', 'Y_Err']
             df = df.apply(pd.to_numeric, errors='coerce')
 
             if df.empty or df.isnull().values.any():
-                st.error("Data contains non-numeric or no data rows. Please check your CSV file.")
-                st.session_state.data_loaded = False
-                st.session_state.processed_file_key = None
-                return
+                st.error("Data contains non-numeric values or is empty."); return
 
-            # Update session state with the new data
-            st.session_state.x_data = df['x'].to_numpy()
-            st.session_state.y_data = df['y'].to_numpy()
-            st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
-            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
+            # MODIFICATION: Add the 'Include in Fit' column
+            df['Include in Fit'] = True
+            st.session_state.data_df = df # Store the complete DataFrame
             st.session_state.x_axis_label, st.session_state.y_axis_label = x_label, y_label
-            st.session_state.df_head = df.head(10)
             st.session_state.data_loaded = True
             st.session_state.processed_file_key = current_file_key
 
-            # Populate manual entry fields with CSV data
             st.session_state.manual_x_label = x_label
             st.session_state.manual_y_label = y_label
-            st.session_state.manual_x_data_str = "\n".join(df['x'].astype(str))
-            st.session_state.manual_x_err_str = "\n".join(df['x_err'].astype(str))
-            st.session_state.manual_y_data_str = "\n".join(df['y'].astype(str))
-            st.session_state.manual_y_err_str = "\n".join(df['y_err'].astype(str))
-
-            # THIS IS THE FIX: Set the active tab for the *next* script run
+            st.session_state.manual_x_data_str = "\n".join(df['X'].astype(str))
+            st.session_state.manual_x_err_str = "\n".join(df['X_Err'].astype(str))
+            st.session_state.manual_y_data_str = "\n".join(df['Y'].astype(str))
+            st.session_state.manual_y_err_str = "\n".join(df['Y_Err'].astype(str))
+            
             st.session_state.active_data_tab = "Enter Data Manually"
 
         except Exception as e:
-            st.error(f"An unexpected error occurred while processing the file: {e}")
+            st.error(f"Error processing file: {e}")
             st.session_state.data_loaded = False
-            st.session_state.processed_file_key = None
-
 
     st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
-    
+    # ... [The get_data, convert_for_download, and download_button for example CSV remain unchanged] ...
     @st.cache_data
     def get_data():
         df = pd.DataFrame(np.array([[0.0, 0.001, 0.2598, 0.001], [0.05, 0.001, 0.3521, 0.001], [0.1, 0.001, 0.4176, 0.001], [0.15, 0.001, 0.4593, 0.001], [0.2, 0.001, 0.4768, 0.001], [0.25, 0.001, 0.4696, 0.001], [0.3, 0.001, 0.4380, 0.001]]),
                        columns=['time (s)', ' ', 'height (m)' ,' '])
         return df
-
     @st.cache_data
     def convert_for_download(df):
         return df.to_csv(index=False).encode("utf-8")
-
     df_example = get_data()
     csv_example = convert_for_download(df_example)
-
-    st.download_button(
-        label="Download Example CSV",
-        data=csv_example,
-        file_name="data.csv",
-        mime="text/csv",
-        icon=":material/download:",
-    )
-
+    st.download_button(label="Download Example CSV", data=csv_example, file_name="data.csv", mime="text/csv", icon=":material/download:")
+    
     uploader_key = f"file_uploader_{st.session_state.uploader_key_counter}"
-    # Attach the callback function to the file uploader using on_change
-    st.file_uploader(
-        "Choose a CSV file",
-        type="csv",
-        key=uploader_key,
-        on_change=handle_file_upload
-    )
+    st.file_uploader("Choose a CSV file", type="csv", key=uploader_key, on_change=handle_file_upload)
 
-# Define the logic for the "Enter Data Manually" tab
 elif selected_tab == "Enter Data Manually":
     st.write("Enter data and axis labels below. Separate numbers with spaces, commas, or new lines.")
     with st.form("manual_data_form"):
-        # Text inputs for labels
         label_col1, label_col2 = st.columns(2)
-        with label_col1:
-            x_label_manual = st.text_input("X-Axis Label", value=st.session_state.manual_x_label)
-        with label_col2:
-            y_label_manual = st.text_input("Y-Axis Label", value=st.session_state.manual_y_label)
-
-        # Text areas for data columns
+        with label_col1: x_label_manual = st.text_input("X-Axis Label", value=st.session_state.manual_x_label)
+        with label_col2: y_label_manual = st.text_input("Y-Axis Label", value=st.session_state.manual_y_label)
         data_col1, data_col2, data_col3, data_col4 = st.columns(4)
-        with data_col1:
-            x_data_manual = st.text_area("X-Values", value=st.session_state.manual_x_data_str)
-        with data_col2:
-            x_err_manual = st.text_area("X-Uncertainties", value=st.session_state.manual_x_err_str)
-        with data_col3:
-            y_data_manual = st.text_area("Y-Values", value=st.session_state.manual_y_data_str)
-        with data_col4:
-            y_err_manual = st.text_area("Y-Uncertainties", value=st.session_state.manual_y_err_str)
-        
+        with data_col1: x_data_manual = st.text_area("X-Values", value=st.session_state.manual_x_data_str)
+        with data_col2: x_err_manual = st.text_area("X-Uncertainties", value=st.session_state.manual_x_err_str)
+        with data_col3: y_data_manual = st.text_area("Y-Values", value=st.session_state.manual_y_data_str)
+        with data_col4: y_err_manual = st.text_area("Y-Uncertainties", value=st.session_state.manual_y_err_str)
         submitted = st.form_submit_button("Load/Update Data")
 
     if submitted:
         try:
-            # Parse all data from text areas
-            x_dat = parse_data_string(x_data_manual)
-            y_dat = parse_data_string(y_data_manual)
-            x_err = parse_data_string(x_err_manual)
-            y_err = parse_data_string(y_err_manual)
-            
-            # Validate the parsed data
-            if not x_dat or not y_dat:
-                st.error("X-Values and Y-Values cannot be empty."); st.stop()
-
-            # Handle single uncertainty values by broadcasting
+            x_dat, y_dat = parse_data_string(x_data_manual), parse_data_string(y_data_manual)
+            x_err, y_err = parse_data_string(x_err_manual), parse_data_string(y_err_manual)
+            if not x_dat or not y_dat: st.error("X and Y values cannot be empty."); st.stop()
             if len(x_err) == 1: x_err = [x_err[0]] * len(x_dat)
             if len(y_err) == 1: y_err = [y_err[0]] * len(y_dat)
-
             if not (len(x_dat) == len(y_dat) == len(x_err) == len(y_err)):
-                st.error(f"Data length mismatch! X: {len(x_dat)}, Y: {len(y_dat)}, X_Err: {len(x_err)}, Y_Err: {len(y_err)}."); st.stop()
-            
-            st.info("Processing data...")
-            st.session_state.uploader_key_counter += 1
-            st.session_state.fit_results = None
-            st.session_state.final_fig = None
-            st.session_state.show_guess_stage = False
-            st.session_state.processed_eq_string = None
-            st.session_state.params = []
-            st.session_state.fit_func = None
-            st.session_state.legend_label_str = ""
-            st.session_state.plot_title_input = ""
-            st.session_state.last_eq_input = ""
-            keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-            for key in keys_to_remove: del st.session_state[key]
+                st.error(f"Data length mismatch! X:{len(x_dat)}, Y:{len(y_dat)}, X_Err:{len(x_err)}, Y_Err:{len(y_err)}."); st.stop()
 
-            df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
-            st.session_state.x_data = df_manual['x'].to_numpy()
-            st.session_state.y_data = df_manual['y'].to_numpy()
-            st.session_state.x_err_safe = safeguard_errors(np.abs(df_manual['x_err'].to_numpy()))
-            st.session_state.y_err_safe = safeguard_errors(np.abs(df_manual['y_err'].to_numpy()))
-            st.session_state.x_axis_label = x_label_manual.strip() if x_label_manual.strip() else "X"
-            st.session_state.y_axis_label = y_label_manual.strip() if y_label_manual.strip() else "Y"
-            st.session_state.df_head = df_manual.head(10)
+            st.session_state.uploader_key_counter += 1
+            st.session_state.fit_results = None; st.session_state.final_fig = None
+            st.session_state.show_guess_stage = False
             
-            manual_data_key = f"manual_{x_label_manual}_{y_label_manual}_{x_data_manual}_{x_err_manual}_{y_data_manual}_{y_err_manual}"
-            st.session_state.processed_file_key = manual_data_key
+            # MODIFICATION: Create and store the new DataFrame
+            df_manual = pd.DataFrame({'X': x_dat, 'X_Err': x_err, 'Y': y_dat, 'Y_Err': y_err})
+            df_manual['Include in Fit'] = True
+            st.session_state.data_df = df_manual
+            
+            st.session_state.x_axis_label = x_label_manual.strip() or "X"
+            st.session_state.y_axis_label = y_label_manual.strip() or "Y"
+            st.session_state.processed_file_key = f"manual_{hash(x_data_manual)}_{hash(y_data_manual)}"
             st.session_state.data_loaded = True
             
-            # Persist the submitted text in the text boxes
-            st.session_state.manual_x_label = x_label_manual
-            st.session_state.manual_y_label = y_label_manual
-            st.session_state.manual_x_data_str = x_data_manual
-            st.session_state.manual_y_data_str = y_data_manual
-            st.session_state.manual_x_err_str = x_err_manual
-            st.session_state.manual_y_err_str = y_err_manual
+            # Persist the current text in the input boxes
+            st.session_state.manual_x_label, st.session_state.manual_y_label = x_label_manual, y_label_manual
+            st.session_state.manual_x_data_str, st.session_state.manual_y_data_str = x_data_manual, y_data_manual
+            st.session_state.manual_x_err_str, st.session_state.manual_y_err_str = x_err_manual, y_err_manual
             
             st.success("Data loaded successfully!")
             st.rerun()
-
-        except ValueError as e:
-            st.error(f"Input Error: {e}")
         except Exception as e:
-            st.error(f"An unexpected error occurred: {e}")
+            st.error(f"Error loading manual data: {e}")
 
     if st.session_state.data_loaded:
         st.markdown("---")
-        
+        # ... [The download button for current data remains unchanged] ...
         @st.cache_data
-        def convert_current_data_to_csv(x_label, y_label, x_data, y_data, x_err, y_err):
-            df_to_save = pd.DataFrame({'x': x_data, 'x_err': x_err, 'y': y_data, 'y_err': y_err})
+        def convert_current_data_to_csv(df, x_label, y_label):
             output = io.StringIO()
             header = f'"{x_label}"," ","{y_label}"," "'
             output.write(header + '\n')
+            # Save only the data columns, not the 'Include' column
+            df_to_save = df[['X', 'X_Err', 'Y', 'Y_Err']]
             df_to_save.to_csv(output, index=False, header=False)
             return output.getvalue().encode('utf-8')
-
-        csv_to_download = convert_current_data_to_csv(
-            st.session_state.x_axis_label, st.session_state.y_axis_label,
-            st.session_state.x_data, st.session_state.y_data,
-            st.session_state.x_err_safe, st.session_state.y_err_safe
-        )
-        
-        st.download_button(
-             label="Download Current Data as CSV",
-             data=csv_to_download,
-             file_name="current_data.csv",
-             mime="text/csv",
-             help="Saves the currently loaded data (including any edits) to a CSV file."
-        )
+        csv_to_download = convert_current_data_to_csv(st.session_state.data_df, st.session_state.x_axis_label, st.session_state.y_axis_label)
+        st.download_button(label="Download Current Data as CSV", data=csv_to_download, file_name="current_data.csv", mime="text/csv")
         
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
-    if st.session_state.df_head is not None:
-        st.markdown("---")
-        st.subheader("Loaded Data Preview")
-        st.dataframe(st.session_state.df_head, use_container_width=True)
-        st.markdown("---")
+    st.markdown("---")
+
+    # MODIFICATION: Display the data editor for selecting points
+    st.subheader("Select Data Points for Fitting")
+    st.info("Uncheck the 'Include in Fit' box for any data points you wish to exclude. Excluded points will be shown as hollow gray circles on the plots but will not be used for fitting or chi-squared calculations.")
+    
+    # Use st.data_editor to allow users to toggle the 'Include in Fit' checkbox.
+    # The data columns themselves are disabled to prevent accidental edits here.
+    edited_df = st.data_editor(
+        st.session_state.data_df,
+        column_config={
+            "X": st.column_config.NumberColumn(format="%.4g"),
+            "X_Err": st.column_config.NumberColumn(format="%.3g"),
+            "Y": st.column_config.NumberColumn(format="%.4g"),
+            "Y_Err": st.column_config.NumberColumn(format="%.3g"),
+        },
+        disabled=["X", "X_Err", "Y", "Y_Err"],
+        use_container_width=True,
+        key="data_editor"
+    )
+    # Persist any changes made in the editor back to the session state
+    st.session_state.data_df = edited_df
+    
+    st.markdown("---")
 
     # Only show the initial plot if a fit has NOT been performed yet
     if not st.session_state.fit_results:
         st.subheader("Initial Data Plot")
         try:
+            full_df = st.session_state.data_df
+            include_mask = full_df['Include in Fit'].astype(bool)
+            x_full = full_df['X'].to_numpy()
+            y_full = full_df['Y'].to_numpy()
+            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
+            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
+
             fig_initial, ax_initial = plt.subplots()
-            ax_initial.errorbar(st.session_state.x_data, st.session_state.y_data, yerr=st.session_state.y_err_safe, xerr=st.session_state.x_err_safe, fmt='o', linestyle='None', capsize=5, label='Data', zorder=5)
+            
+            # Plot included data
+            ax_initial.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', linestyle='None', capsize=5, label='Included Data', zorder=5)
+            
+            # Plot excluded data if any exist
+            if np.sum(~include_mask) > 0:
+                 ax_initial.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', linestyle='None', capsize=5, label='Excluded Data', zorder=4)
+
             ax_initial.set_xlabel(st.session_state.x_axis_label)
             ax_initial.set_ylabel(st.session_state.y_axis_label)
             ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
@@ -762,82 +710,66 @@ if st.session_state.data_loaded:
         for i, param in enumerate(params):
             with cols[i]:
                 guess_key = f"init_guess_{param}"
-                if guess_key not in st.session_state:
-                    st.session_state[guess_key] = 1.0
-
+                if guess_key not in st.session_state: st.session_state[guess_key] = 1.0
                 current_value = st.session_state[guess_key]
-                format_specifier = "%.3f"
-                if current_value != 0:
-                    if abs(current_value) < 0.01 or abs(current_value) > 1000:
-                        format_specifier = "%.3e"
-
+                format_specifier = "%.3f" if 0.01 <= abs(current_value) <= 1000 and current_value != 0 else "%.3e"
                 initial_guesses[param] = st.number_input(f"Parameter {param}", value=st.session_state[guess_key], key=guess_key, step=None, format=format_specifier)
 
         st.markdown("---")
         st.write("**Preview with Current Parameter Values:**")
 
         try:
+            full_df = st.session_state.data_df
+            include_mask = full_df['Include in Fit'].astype(bool)
+            x_full, y_full = full_df['X'].to_numpy(), full_df['Y'].to_numpy()
+            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
+            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
+            
+            x_fit, y_fit = x_full[include_mask], y_full[include_mask]
+            x_err_fit, y_err_fit = x_err_full[include_mask], y_err_full[include_mask]
+            
             current_guess_values = [initial_guesses[p] for p in params]
-            x_data = st.session_state.x_data
-            y_data = st.session_state.y_data
-            x_err_safe = st.session_state.x_err_safe
-            y_err_safe = st.session_state.y_err_safe
+            y_guess = fit_func(x_fit, *current_guess_values)
+            residuals = y_fit - y_guess
+            slopes = numerical_derivative(fit_func, x_fit, current_guess_values)
+            total_err = safeguard_errors(np.sqrt(y_err_fit**2 + (slopes * x_err_fit)**2))
+            dof = len(x_fit) - len(params)
 
-            y_guess_at_points = fit_func(x_data, *current_guess_values)
-            residuals_preview = y_data - y_guess_at_points
-
-            slopes_preview = numerical_derivative(fit_func, x_data, current_guess_values)
-            total_err_sq_preview = y_err_safe**2 + (slopes_preview * x_err_safe)**2
-            total_err_preview_safe = safeguard_errors(np.sqrt(total_err_sq_preview))
-            dof_preview = len(x_data) - len(params)
-
-            if dof_preview > 0:
-                chi_squared_preview = np.sum((residuals_preview / total_err_preview_safe)**2)
-                red_chi_squared_preview = chi_squared_preview / dof_preview
-                red_chi_squared_err_preview = np.sqrt(2.0 / dof_preview)
+            if dof > 0:
+                chi2 = np.sum((residuals / total_err)**2)
+                red_chi2 = chi2 / dof
             else:
-                chi_squared_preview, red_chi_squared_preview, red_chi_squared_err_preview = np.nan, np.nan, np.nan
+                chi2, red_chi2 = np.nan, np.nan
 
             metric_cols = st.columns(2)
-            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi_squared_preview:.4f}")
-            metric_cols[1].metric("Manual Fit Reduced χ²/DoF", f"{red_chi_squared_preview:.4f}", help=f"Calculated with DoF = {dof_preview}")
+            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi2:.4f}")
+            metric_cols[1].metric("Manual Fit Reduced χ²/DoF", f"{red_chi2:.4f}", help=f"Calculated with DoF = {dof}")
 
-            # --- Build the legend labels for the preview plot ---
-            equation_label = st.session_state.legend_label_str
-            stats_parts = []
-            for i, p_name in enumerate(params):
-                stats_parts.append(f"${p_name} = {current_guess_values[i]:.4g}$")
-            red_chi2_str_preview = format_value_uncertainty(red_chi_squared_preview, red_chi_squared_err_preview)
-            stats_parts.append(f"$\\chi^2/DoF = {red_chi2_str_preview.replace('$', '')}$")
-            stats_label = "\n".join(stats_parts)
-
-            # --- Generate points for the smooth preview curve ---
-            x_min_data, x_max_data = np.min(x_data), np.max(x_data)
-            x_preview_curve = np.linspace(x_min_data, x_max_data, 200)
-            y_preview_curve = fit_func(x_preview_curve, *current_guess_values)
-
-            # --- Create a two-panel plot (main + residuals) ---
             fig_preview = plt.figure()
             gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+            ax0 = fig_preview.add_subplot(gs_preview[0])
 
-            ax0_preview = fig_preview.add_subplot(gs_preview[0])
-            ax0_preview.errorbar(x_data, y_data, yerr=y_err_safe, xerr=x_err_safe, fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
-            ax0_preview.plot(x_preview_curve, y_preview_curve, 'r--', label=equation_label, zorder=10)
-            ax0_preview.plot([], [], ' ', label=stats_label)
+            ax0.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5)
+            if np.sum(~include_mask) > 0:
+                ax0.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', markersize=4, linestyle='None', capsize=3, label='Excluded Data', zorder=4)
+
+            x_curve = np.linspace(np.min(x_full), np.max(x_full), 200)
+            y_curve = fit_func(x_curve, *current_guess_values)
+            ax0.plot(x_curve, y_curve, 'r--', label="Manual Guess", zorder=10)
 
             preview_title = st.session_state.plot_title_input.strip() or f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
-            ax0_preview.set_ylabel(st.session_state.y_axis_label)
-            ax0_preview.set_title(preview_title)
-            ax0_preview.legend(loc='best', fontsize='large')
-            ax0_preview.grid(True, linestyle=':', alpha=0.7)
-            ax0_preview.tick_params(axis='x', labelbottom=False)
+            ax0.set_ylabel(st.session_state.y_axis_label)
+            ax0.set_title(preview_title)
+            ax0.legend(loc='best', fontsize='large')
+            ax0.grid(True, linestyle=':', alpha=0.7)
+            ax0.tick_params(axis='x', labelbottom=False)
 
-            ax1_preview = fig_preview.add_subplot(gs_preview[1], sharex=ax0_preview)
-            ax1_preview.errorbar(x_data, residuals_preview, yerr=total_err_preview_safe, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-            ax1_preview.axhline(0, color='grey', linestyle='--', linewidth=1)
-            ax1_preview.set_xlabel(st.session_state.x_axis_label)
-            ax1_preview.set_ylabel("Residuals")
-            ax1_preview.grid(True, linestyle=':', alpha=0.6)
+            ax1 = fig_preview.add_subplot(gs_preview[1], sharex=ax0)
+            ax1.errorbar(x_fit, residuals, yerr=total_err, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+            ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
+            ax1.set_xlabel(st.session_state.x_axis_label)
+            ax1.set_ylabel("Residuals")
+            ax1.grid(True, linestyle=':', alpha=0.6)
 
             fig_preview.tight_layout(pad=1.0)
             st.pyplot(fig_preview)
@@ -847,30 +779,19 @@ if st.session_state.data_loaded:
             st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
 
         st.markdown("---")
-        st.write("If this manual fit is unsatisfactory, you can start over. If it serves as a good initial guess, proceed to the automatic fit.")
-
         b_col1, b_col2 = st.columns(2)
         with b_col1:
             if st.button("Define New Fit", key="redefine_fit_button"):
                 st.session_state.show_guess_stage = False
                 st.session_state.fit_results = None
-                st.session_state.final_fig = None
-                st.session_state.processed_eq_string = None
-                st.session_state.params = []
-                st.session_state.fit_func = None
-                for key in list(st.session_state.keys()):
-                     if key.startswith("init_guess_"):
-                         del st.session_state[key]
+                for key in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[key]
                 st.rerun()
-
         with b_col2:
-            autofit_button = st.button("Perform Autofit", key="autofit_button")
-
-        if autofit_button:
-            final_initial_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
-            if perform_the_autofit(final_initial_guesses):
-                st.session_state.show_guess_stage = False
-                st.rerun()
+            if st.button("Perform Autofit", key="autofit_button"):
+                final_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
+                if perform_the_autofit(final_guesses):
+                    st.session_state.show_guess_stage = False
+                    st.rerun()
 
     elif st.session_state.fit_results:
         st.subheader("Step 3: Fit Results")
@@ -878,27 +799,18 @@ if st.session_state.data_loaded:
         if st.session_state.final_fig:
             st.pyplot(st.session_state.final_fig)
             plt.close(st.session_state.final_fig)
-        else:
-            st.warning("Final plot figure not found in session state.")
 
-        # --- Axis Control UI ---
         st.markdown("---")
         st.markdown("##### Adjust Plot Axes")
 
         def handle_origin_toggle():
-            # This function is triggered when the checkbox state changes
             if st.session_state.include_origin_checkbox:
-                # If checkbox is now ticked, calculate new limits including origin
-                auto_x = st.session_state.auto_limits['x']
-                auto_y = st.session_state.auto_limits['y']
+                auto_x, auto_y = st.session_state.auto_limits['x'], st.session_state.auto_limits['y']
                 st.session_state.xlim_current = (min(0, auto_x[0]), max(0, auto_x[1]))
                 st.session_state.ylim_current = (min(0, auto_y[0]), max(0, auto_y[1]))
             else:
-                # If checkbox is now unticked, revert to the original auto limits
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
-            
-            # Regenerate the figure with the new limits
             new_fig, _, _ = recreate_final_figure(xlim=st.session_state.xlim_current, ylim=st.session_state.ylim_current)
             st.session_state.final_fig = new_fig
 
@@ -915,60 +827,44 @@ if st.session_state.data_loaded:
         b1, b2 = st.columns(2)
         with b1:
             if st.button("Update Plot with Manual Range", use_container_width=True):
-                st.session_state.xlim_current = (xmin, xmax)
-                st.session_state.ylim_current = (ymin, ymax)
+                st.session_state.xlim_current, st.session_state.ylim_current = (xmin, xmax), (ymin, ymax)
                 new_fig, _, _ = recreate_final_figure(xlim=(xmin, xmax), ylim=(ymin, ymax))
                 st.session_state.final_fig = new_fig
-                st.rerun() # Rerun to reflect the changes
+                st.rerun()
         with b2:
             if st.button("Reset to Auto Range", use_container_width=True):
-                # Reset limits in state and untick the origin checkbox
                 st.session_state.xlim_current = st.session_state.auto_limits['x']
                 st.session_state.ylim_current = st.session_state.auto_limits['y']
                 st.session_state.include_origin_checkbox = False 
                 new_fig, _, _ = recreate_final_figure()
                 st.session_state.final_fig = new_fig
-                st.rerun() # Rerun to apply reset
+                st.rerun()
 
         st.markdown("---")
         
-        # --- Final Actions Section ---
         f1, f2 = st.columns(2)
         with f1:
-            # Prepare and show the download button
             if st.session_state.final_fig:
                 try:
                     user_title = st.session_state.plot_title_input.strip()
                     default_title = f"{st.session_state.y_axis_label}_vs_{st.session_state.x_axis_label}_fit"
-                    plot_title_for_filename = user_title or default_title
-                    fn = re.sub(r'[^\w\.\-]+', '_', plot_title_for_filename).strip('_').lower() or "fit_plot"
-                    fn += ".svg"
+                    fn = re.sub(r'[^\w\.\-]+', '_', user_title or default_title).strip('_').lower() or "fit_plot"
                     img_buffer = io.BytesIO()
                     st.session_state.final_fig.savefig(img_buffer, format='svg', bbox_inches='tight', pad_inches=0.1)
                     img_buffer.seek(0)
-                    st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=fn, mime="image/svg+xml", use_container_width=True)
+                    st.download_button(label="Download Plot as SVG", data=img_buffer, file_name=f"{fn}.svg", mime="image/svg+xml", use_container_width=True)
                 except Exception as dl_err:
                      st.warning(f"Could not prepare plot for download: {dl_err}")
 
         with f2:
-            # Show the "Define New Fit" button
             if st.button("Define New Fit", use_container_width=True, type="primary"):
-                # Clean up axis control state variables
-                for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                
+                for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox', 'fit_results', 'final_fig', 'processed_eq_string', 'fit_func']:
+                    if key in st.session_state: del st.session_state[key]
+                for key in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[key]
                 st.session_state.show_guess_stage = False
-                st.session_state.fit_results = None
-                st.session_state.final_fig = None
-                st.session_state.processed_eq_string = None
                 st.session_state.params = []
-                st.session_state.fit_func = None
-                for key in list(st.session_state.keys()):
-                     if key.startswith("init_guess_"):
-                         del st.session_state[key]
                 st.rerun()
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Updated 9/18/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 12/4/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
