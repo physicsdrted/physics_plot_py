@@ -427,16 +427,93 @@ if 'uploader_key_counter' not in st.session_state:
 
 # --- Data Input Section ---
 
-# MODIFICATION: Use st.radio to allow programmatic tab switching
+# Use st.radio to allow programmatic tab switching. Its value is read from and saved to session_state.
 selected_tab = st.radio(
     "Data Input Method",
     ["Upload CSV File", "Enter Data Manually"],
     key='active_data_tab',
     horizontal=True,
-    label_visibility="collapsed" # Hides the "Data Input Method" label to look like tabs
+    label_visibility="collapsed"
 )
 
+# Define the logic for the "Upload CSV File" tab
 if selected_tab == "Upload CSV File":
+    
+    # Define the callback function that will handle the file upload.
+    # This function runs BEFORE the rest of the script is re-executed.
+    def handle_file_upload():
+        uploader_key = f"file_uploader_{st.session_state.uploader_key_counter}"
+        uploaded_file = st.session_state[uploader_key]
+        if uploaded_file is None:
+            return
+
+        current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+        if current_file_key == st.session_state.get('processed_file_key', None):
+            return # Avoid reprocessing the same file on rerun
+
+        st.info(f"Processing new uploaded file: {uploaded_file.name}")
+        
+        # Reset the application state for a new fit
+        st.session_state.fit_results = None
+        st.session_state.final_fig = None
+        st.session_state.show_guess_stage = False
+        st.session_state.processed_eq_string = None
+        st.session_state.params = []
+        st.session_state.fit_func = None
+        st.session_state.legend_label_str = ""
+        st.session_state.plot_title_input = ""
+        st.session_state.last_eq_input = ""
+        keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
+        for key in keys_to_remove:
+            del st.session_state[key]
+
+        try:
+            # Process the uploaded file
+            raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
+            if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
+                st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
+                st.session_state.data_loaded = False
+                st.session_state.processed_file_key = None
+                return
+
+            x_label, y_label = str(raw_df.iloc[0, 0]), str(raw_df.iloc[0, 2])
+            df = raw_df.iloc[1:].copy()
+            df.columns = ['x', 'x_err', 'y', 'y_err']
+            df = df.apply(pd.to_numeric, errors='coerce')
+
+            if df.empty or df.isnull().values.any():
+                st.error("Data contains non-numeric or no data rows. Please check your CSV file.")
+                st.session_state.data_loaded = False
+                st.session_state.processed_file_key = None
+                return
+
+            # Update session state with the new data
+            st.session_state.x_data = df['x'].to_numpy()
+            st.session_state.y_data = df['y'].to_numpy()
+            st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy()))
+            st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
+            st.session_state.x_axis_label, st.session_state.y_axis_label = x_label, y_label
+            st.session_state.df_head = df.head(10)
+            st.session_state.data_loaded = True
+            st.session_state.processed_file_key = current_file_key
+
+            # Populate manual entry fields with CSV data
+            st.session_state.manual_x_label = x_label
+            st.session_state.manual_y_label = y_label
+            st.session_state.manual_x_data_str = "\n".join(df['x'].astype(str))
+            st.session_state.manual_x_err_str = "\n".join(df['x_err'].astype(str))
+            st.session_state.manual_y_data_str = "\n".join(df['y'].astype(str))
+            st.session_state.manual_y_err_str = "\n".join(df['y_err'].astype(str))
+
+            # THIS IS THE FIX: Set the active tab for the *next* script run
+            st.session_state.active_data_tab = "Enter Data Manually"
+
+        except Exception as e:
+            st.error(f"An unexpected error occurred while processing the file: {e}")
+            st.session_state.data_loaded = False
+            st.session_state.processed_file_key = None
+
+
     st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
     
     @st.cache_data
@@ -461,64 +538,15 @@ if selected_tab == "Upload CSV File":
     )
 
     uploader_key = f"file_uploader_{st.session_state.uploader_key_counter}"
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key=uploader_key)
-    
-    if uploaded_file is not None:
-        current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
-        if current_file_key != st.session_state.get('processed_file_key', None):
-            st.info(f"Processing new uploaded file: {uploaded_file.name}")
-            # Full reset of application state
-            st.session_state.fit_results = None
-            st.session_state.final_fig = None
-            st.session_state.show_guess_stage = False
-            st.session_state.processed_eq_string = None
-            st.session_state.params = []
-            st.session_state.fit_func = None
-            st.session_state.legend_label_str = ""
-            st.session_state.plot_title_input = ""
-            st.session_state.last_eq_input = ""
-            keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-            for key in keys_to_remove:
-                del st.session_state[key]
+    # Attach the callback function to the file uploader using on_change
+    st.file_uploader(
+        "Choose a CSV file",
+        type="csv",
+        key=uploader_key,
+        on_change=handle_file_upload
+    )
 
-            try:
-                raw_df = pd.read_csv(uploaded_file, header=None, dtype=str)
-                if raw_df.empty or raw_df.shape[0] < 2 or raw_df.shape[1] < 4:
-                    st.error("Invalid file structure: Ensure header row and at least one data row with 4 columns.")
-                    st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-                x_label = str(raw_df.iloc[0, 0]); y_label = str(raw_df.iloc[0, 2])
-                df = raw_df.iloc[1:].copy()
-                if df.empty:
-                    st.error("No data rows found."); st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-                df.columns = ['x', 'x_err', 'y', 'y_err']
-                df = df.apply(pd.to_numeric, errors='coerce')
-                if df.isnull().values.any():
-                    st.error("Data contains non-numeric values. Please check your CSV file."); st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-
-                st.session_state.x_data = df['x'].to_numpy(); st.session_state.y_data = df['y'].to_numpy()
-                st.session_state.x_err_safe = safeguard_errors(np.abs(df['x_err'].to_numpy())); st.session_state.y_err_safe = safeguard_errors(np.abs(df['y_err'].to_numpy()))
-                st.session_state.x_axis_label = x_label; st.session_state.y_axis_label = y_label
-                st.session_state.df_head = df.head(10)
-                st.session_state.data_loaded = True
-                st.session_state.processed_file_key = current_file_key
-                
-                # Populate manual entry fields with CSV data
-                st.session_state.manual_x_label = x_label
-                st.session_state.manual_y_label = y_label
-                st.session_state.manual_x_data_str = "\n".join(df['x'].astype(str))
-                st.session_state.manual_x_err_str = "\n".join(df['x_err'].astype(str))
-                st.session_state.manual_y_data_str = "\n".join(df['y'].astype(str))
-                st.session_state.manual_y_err_str = "\n".join(df['y_err'].astype(str))
-                
-                # MODIFICATION: This is the key change to switch the tab
-                st.session_state.active_data_tab = "Enter Data Manually"
-                st.success("Data loaded and pre-populated for editing.")
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"An unexpected error occurred while processing the file: {e}")
-                st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
-
+# Define the logic for the "Enter Data Manually" tab
 elif selected_tab == "Enter Data Manually":
     st.write("Enter data and axis labels below. Separate numbers with spaces, commas, or new lines.")
     with st.form("manual_data_form"):
@@ -629,6 +657,7 @@ elif selected_tab == "Enter Data Manually":
              mime="text/csv",
              help="Saves the currently loaded data (including any edits) to a CSV file."
         )
+        
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
     if st.session_state.df_head is not None:
