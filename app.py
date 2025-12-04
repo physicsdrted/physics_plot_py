@@ -134,8 +134,13 @@ def {func_name}(x, {param_str}):
             result = np.nan
         return result
     except Exception:
-        # If any error occurs during evaluation, return NaN.
-        return np.full_like(x, np.nan) if isinstance(x, np.ndarray) else np.nan
+        # If any error occurs during evaluation, return an array of NaNs
+        # that has the same shape as the input 'x'. This correctly handles
+        # lists, numpy arrays, and pandas Series.
+        try:
+            return np.full(np.shape(x), np.nan)
+        except:
+            return np.nan # Fallback for scalar input
 """
     # Execute the function definition in a controlled namespace.
     exec_globals = {'np': np, '_SAFE_GLOBALS': SAFE_GLOBALS, '_EQ_STRING': eq_string}
@@ -148,7 +153,7 @@ def {func_name}(x, {param_str}):
     if func_name not in local_namespace:
         raise RuntimeError("Could not create fit function.")
     return local_namespace[func_name]
-
+    
 def numerical_derivative(func, x, params, h=1e-7):
     """
     Calculates the numerical derivative using the central difference method.
