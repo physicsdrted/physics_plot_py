@@ -577,12 +577,9 @@ elif selected_tab == "Enter Data Manually":
 if st.session_state.data_loaded:
     st.markdown("---")
 
-    # MODIFICATION: Display the data editor for selecting points
     st.subheader("Select Data Points for Fitting")
     st.info("Uncheck the 'Include in Fit' box for any data points you wish to exclude. Excluded points will be shown as hollow gray circles on the plots but will not be used for fitting or chi-squared calculations.")
     
-    # Use st.data_editor to allow users to toggle the 'Include in Fit' checkbox.
-    # The data columns themselves are disabled to prevent accidental edits here.
     edited_df = st.data_editor(
         st.session_state.data_df,
         column_config={
@@ -595,205 +592,25 @@ if st.session_state.data_loaded:
         use_container_width=True,
         key="data_editor"
     )
-    # Persist any changes made in the editor back to the session state
     st.session_state.data_df = edited_df
     
+    # MODIFICATION: Add a button to refit the data after changing selections
+    # This button only appears AFTER an initial fit has been performed.
+    if 'fit_results' in st.session_state and st.session_state.fit_results:
+        if st.button("Update Fit with New Selection", type="primary", use_container_width=True):
+            # Use the previous best-fit parameters as the initial guess for the refit
+            initial_guesses = st.session_state.fit_results['popt']
+            if perform_the_autofit(initial_guesses):
+                st.success("Fit updated successfully!")
+                st.rerun()
+
     st.markdown("---")
 
-    # Only show the initial plot if a fit has NOT been performed yet
-    if not st.session_state.fit_results:
-        st.subheader("Initial Data Plot")
-        try:
-            full_df = st.session_state.data_df
-            include_mask = full_df['Include in Fit'].astype(bool)
-            x_full = full_df['X'].to_numpy()
-            y_full = full_df['Y'].to_numpy()
-            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
-            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
-
-            fig_initial, ax_initial = plt.subplots()
-            
-            # Plot included data
-            ax_initial.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', linestyle='None', capsize=5, label='Included Data', zorder=5)
-            
-            # Plot excluded data if any exist
-            if np.sum(~include_mask) > 0:
-                 ax_initial.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', linestyle='None', capsize=5, label='Excluded Data', zorder=4)
-
-            ax_initial.set_xlabel(st.session_state.x_axis_label)
-            ax_initial.set_ylabel(st.session_state.y_axis_label)
-            ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
-            ax_initial.grid(True, linestyle=':', alpha=0.7)
-            ax_initial.legend()
-            plt.tight_layout()
-            st.pyplot(fig_initial)
-            plt.close(fig_initial)
-        except Exception as plot_err:
-            st.error(f"Error generating initial plot: {plot_err}")
-
-        st.markdown("---")
-
-    if not st.session_state.show_guess_stage and not st.session_state.fit_results:
-        st.subheader("Step 1: Enter Fit Details")
-        st.markdown("""**Instructions:**
-*   Use `x` for the independent variable.
-*   Use single uppercase letters (A-Z) for fit parameters.
-*   Use standard Python math operators: `+`, `-`, `*`, `/`, `**` (power).
-*   Allowed functions: `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `atan`, `sinh`, `cosh`, `tanh`, `exp`, `log` (natural), `ln` (natural), `log10`, `sqrt`, `abs`, `absolute`.
-*   Use `pi` for the constant π.
-**Examples:**
-*   Linear: `A * x + B`
-*   Quadratic: `A * x**2 + B * x + C`""")
-
-        eq_string_input = st.text_input("Equation:", value=st.session_state.get('last_eq_input', ""), help="Use x, params A-Z, funcs. Ex: A * exp(-B * x) + C", key="equation_input")
-        st.session_state.plot_title_input = st.text_input("Optional Plot Title:", value=st.session_state.get('plot_title_input', ""), help="Leave blank for default title.", key="plot_title_input_widget")
-
-        b_col1, b_col2 = st.columns(2)
-        with b_col1:
-            manual_fit_button = st.button("Set Equation & Try a Manual Fit", key="manual_fit_button")
-        with b_col2:
-            direct_autofit_button = st.button("Set Equation & Perform Autofit", key="direct_autofit_button")
-
-        if (manual_fit_button or direct_autofit_button) and eq_string_input:
-            st.session_state.last_eq_input = eq_string_input
-            st.session_state.fit_results = None
-            st.session_state.final_fig = None
-            validation_passed = False
-            with st.spinner("Validating equation..."):
-                try:
-                    processed_eq, params_list = validate_and_parse_equation(eq_string_input)
-                    legend_label = format_equation_mathtext(processed_eq)
-                    fit_function = create_fit_function(processed_eq, params_list)
-                    st.session_state.processed_eq_string = processed_eq
-                    st.session_state.params = params_list
-                    st.session_state.fit_func = fit_function
-                    st.session_state.legend_label_str = legend_label
-                    validation_passed = True
-                except (ValueError, SyntaxError, RuntimeError) as e:
-                    st.error(f"Input Error: {e}")
-                except Exception as e:
-                    st.error(f"Unexpected error during setup: {e}")
-
-            if validation_passed:
-                if manual_fit_button:
-                    st.session_state.show_guess_stage = True
-                    st.rerun()
-
-                elif direct_autofit_button:
-                    default_guesses = [1.0] * len(st.session_state.params)
-                    fit_successful = perform_the_autofit(default_guesses)
-
-                    if fit_successful:
-                        st.session_state.show_guess_stage = False
-                        st.rerun()
-                    else:
-                        st.warning("Automatic fit failed. The model may be too complex or the data too noisy for a default guess. Please provide a manual starting fit.")
-                        for i, param in enumerate(st.session_state.params):
-                            st.session_state[f"init_guess_{param}"] = default_guesses[i]
-                        st.session_state.show_guess_stage = True
-                        st.rerun()
-
-    elif st.session_state.show_guess_stage and not st.session_state.fit_results:
-        st.subheader("Step 2: Manual Fit & Preview")
-        st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
-
-        params = st.session_state.params
-        fit_func = st.session_state.fit_func
-
-        if not params or fit_func is None:
-             st.error("Error: Parameters or fit function not available. Please re-enter equation.")
-             st.session_state.show_guess_stage = False
-             st.rerun()
-
-        initial_guesses = {}
-        cols = st.columns(len(params))
-        for i, param in enumerate(params):
-            with cols[i]:
-                guess_key = f"init_guess_{param}"
-                if guess_key not in st.session_state: st.session_state[guess_key] = 1.0
-                current_value = st.session_state[guess_key]
-                format_specifier = "%.3f" if 0.01 <= abs(current_value) <= 1000 and current_value != 0 else "%.3e"
-                initial_guesses[param] = st.number_input(f"Parameter {param}", value=st.session_state[guess_key], key=guess_key, step=None, format=format_specifier)
-
-        st.markdown("---")
-        st.write("**Preview with Current Parameter Values:**")
-
-        try:
-            full_df = st.session_state.data_df
-            include_mask = full_df['Include in Fit'].astype(bool)
-            x_full, y_full = full_df['X'].to_numpy(), full_df['Y'].to_numpy()
-            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
-            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
-            
-            x_fit, y_fit = x_full[include_mask], y_full[include_mask]
-            x_err_fit, y_err_fit = x_err_full[include_mask], y_err_full[include_mask]
-            
-            current_guess_values = [initial_guesses[p] for p in params]
-            y_guess = fit_func(x_fit, *current_guess_values)
-            residuals = y_fit - y_guess
-            slopes = numerical_derivative(fit_func, x_fit, current_guess_values)
-            total_err = safeguard_errors(np.sqrt(y_err_fit**2 + (slopes * x_err_fit)**2))
-            dof = len(x_fit) - len(params)
-
-            if dof > 0:
-                chi2 = np.sum((residuals / total_err)**2)
-                red_chi2 = chi2 / dof
-            else:
-                chi2, red_chi2 = np.nan, np.nan
-
-            metric_cols = st.columns(2)
-            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi2:.4f}")
-            metric_cols[1].metric("Manual Fit Reduced χ²/DoF", f"{red_chi2:.4f}", help=f"Calculated with DoF = {dof}")
-
-            fig_preview = plt.figure()
-            gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
-            ax0 = fig_preview.add_subplot(gs_preview[0])
-
-            ax0.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5)
-            if np.sum(~include_mask) > 0:
-                ax0.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', markersize=4, linestyle='None', capsize=3, label='Excluded Data', zorder=4)
-
-            x_curve = np.linspace(np.min(x_full), np.max(x_full), 200)
-            y_curve = fit_func(x_curve, *current_guess_values)
-            ax0.plot(x_curve, y_curve, 'r--', label="Manual Guess", zorder=10)
-
-            preview_title = st.session_state.plot_title_input.strip() or f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
-            ax0.set_ylabel(st.session_state.y_axis_label)
-            ax0.set_title(preview_title)
-            ax0.legend(loc='best', fontsize='large')
-            ax0.grid(True, linestyle=':', alpha=0.7)
-            ax0.tick_params(axis='x', labelbottom=False)
-
-            ax1 = fig_preview.add_subplot(gs_preview[1], sharex=ax0)
-            ax1.errorbar(x_fit, residuals, yerr=total_err, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
-            ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
-            ax1.set_xlabel(st.session_state.x_axis_label)
-            ax1.set_ylabel("Residuals")
-            ax1.grid(True, linestyle=':', alpha=0.6)
-
-            fig_preview.tight_layout(pad=1.0)
-            st.pyplot(fig_preview)
-            plt.close(fig_preview)
-
-        except Exception as preview_err:
-            st.warning(f"Could not generate preview plot or stats: {preview_err}. Check parameter values and equation.")
-
-        st.markdown("---")
-        b_col1, b_col2 = st.columns(2)
-        with b_col1:
-            if st.button("Define New Fit", key="redefine_fit_button"):
-                st.session_state.show_guess_stage = False
-                st.session_state.fit_results = None
-                for key in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[key]
-                st.rerun()
-        with b_col2:
-            if st.button("Perform Autofit", key="autofit_button"):
-                final_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
-                if perform_the_autofit(final_guesses):
-                    st.session_state.show_guess_stage = False
-                    st.rerun()
-
-    elif st.session_state.fit_results:
+    # MODIFICATION: Refactor the main logic to be more robust and fix the AttributeError
+    # This safer structure checks for the existence of 'fit_results' before trying to access it.
+    
+    # STATE 3: A fit has been successfully performed. Show the results.
+    if 'fit_results' in st.session_state and st.session_state.fit_results:
         st.subheader("Step 3: Fit Results")
         
         if st.session_state.final_fig:
@@ -857,13 +674,176 @@ if st.session_state.data_loaded:
                      st.warning(f"Could not prepare plot for download: {dl_err}")
 
         with f2:
-            if st.button("Define New Fit", use_container_width=True, type="primary"):
-                for key in ['auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox', 'fit_results', 'final_fig', 'processed_eq_string', 'fit_func']:
-                    if key in st.session_state: del st.session_state[key]
-                for key in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[key]
-                st.session_state.show_guess_stage = False
-                st.session_state.params = []
+            if st.button("Define New Fit", use_container_width=True):
+                # Clean up state before returning to the equation definition stage
+                keys_to_delete = [
+                    'auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox', 
+                    'fit_results', 'final_fig', 'processed_eq_string', 'fit_func', 
+                    'show_guess_stage', 'params'
+                ]
+                for key in keys_to_delete:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                for key in [k for k in st.session_state if k.startswith("init_guess_")]:
+                    del st.session_state[key]
                 st.rerun()
+
+    # STATE 2: The user has defined an equation and is making a manual guess.
+    elif 'show_guess_stage' in st.session_state and st.session_state.show_guess_stage:
+        st.subheader("Step 2: Manual Fit & Preview")
+        st.info(f"Using Equation: y = {st.session_state.processed_eq_string}")
+
+        params = st.session_state.params
+        fit_func = st.session_state.fit_func
+
+        if not params or fit_func is None:
+             st.error("Error: Parameters or fit function not available. Please re-enter equation.")
+             st.session_state.show_guess_stage = False
+             st.rerun()
+
+        initial_guesses = {}
+        cols = st.columns(len(params))
+        for i, param in enumerate(params):
+            with cols[i]:
+                guess_key = f"init_guess_{param}"
+                if guess_key not in st.session_state: st.session_state[guess_key] = 1.0
+                current_value = st.session_state[guess_key]
+                format_specifier = "%.3f" if 0.01 <= abs(current_value) <= 1000 and current_value != 0 else "%.3e"
+                initial_guesses[param] = st.number_input(f"Parameter {param}", value=st.session_state[guess_key], key=guess_key, step=None, format=format_specifier)
+
+        st.markdown("---")
+        st.write("**Preview with Current Parameter Values:**")
+
+        try:
+            full_df = st.session_state.data_df
+            include_mask = full_df['Include in Fit'].astype(bool)
+            x_full, y_full = full_df['X'].to_numpy(), full_df['Y'].to_numpy()
+            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
+            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
+            x_fit, y_fit, x_err_fit, y_err_fit = x_full[include_mask], y_full[include_mask], x_err_full[include_mask], y_err_full[include_mask]
+            
+            current_guess_values = [initial_guesses[p] for p in params]
+            y_guess = fit_func(x_fit, *current_guess_values)
+            residuals = y_fit - y_guess
+            slopes = numerical_derivative(fit_func, x_fit, current_guess_values)
+            total_err = safeguard_errors(np.sqrt(y_err_fit**2 + (slopes * x_err_fit)**2))
+            dof = len(x_fit) - len(params)
+
+            if dof > 0: chi2, red_chi2 = np.sum((residuals / total_err)**2), np.sum((residuals / total_err)**2) / dof
+            else: chi2, red_chi2 = np.nan, np.nan
+
+            metric_cols = st.columns(2)
+            metric_cols[0].metric("Manual Fit Chi-squared (χ²)", f"{chi2:.4f}")
+            metric_cols[1].metric("Manual Fit Reduced χ²/DoF", f"{red_chi2:.4f}", help=f"Calculated with DoF = {dof}")
+
+            fig_preview = plt.figure()
+            gs_preview = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+            ax0 = fig_preview.add_subplot(gs_preview[0])
+
+            ax0.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5)
+            if np.sum(~include_mask) > 0:
+                ax0.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', markersize=4, linestyle='None', capsize=3, label='Excluded Data', zorder=4)
+
+            x_curve = np.linspace(np.min(x_full), np.max(x_full), 200)
+            y_curve = fit_func(x_curve, *current_guess_values)
+            ax0.plot(x_curve, y_curve, 'r--', label="Manual Guess", zorder=10)
+
+            title = st.session_state.plot_title_input.strip() or f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label}"
+            ax0.set_ylabel(st.session_state.y_axis_label); ax0.set_title(title)
+            ax0.legend(loc='best', fontsize='large'); ax0.grid(True, linestyle=':', alpha=0.7)
+            ax0.tick_params(axis='x', labelbottom=False)
+
+            ax1 = fig_preview.add_subplot(gs_preview[1], sharex=ax0)
+            ax1.errorbar(x_fit, residuals, yerr=total_err, fmt='o', markersize=4, linestyle='None', capsize=3, zorder=5)
+            ax1.axhline(0, color='grey', linestyle='--', linewidth=1)
+            ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals")
+            ax1.grid(True, linestyle=':', alpha=0.6)
+            fig_preview.tight_layout(pad=1.0)
+            st.pyplot(fig_preview); plt.close(fig_preview)
+        except Exception as e:
+            st.warning(f"Could not generate preview plot or stats: {e}. Check parameter values and equation.")
+
+        st.markdown("---")
+        b_col1, b_col2 = st.columns(2)
+        with b_col1:
+            if st.button("Define New Fit", key="redefine_fit_button"):
+                st.session_state.show_guess_stage = False
+                st.session_state.fit_results = None
+                for key in [k for k in st.session_state if k.startswith("init_guess_")]: del st.session_state[key]
+                st.rerun()
+        with b_col2:
+            if st.button("Perform Autofit", key="autofit_button"):
+                final_guesses = [st.session_state[f"init_guess_{p}"] for p in params]
+                if perform_the_autofit(final_guesses):
+                    st.session_state.show_guess_stage = False
+                    st.rerun()
+
+    # STATE 1: Data is loaded. Show the initial plot and prompt for an equation.
+    else:
+        st.subheader("Initial Data Plot")
+        try:
+            full_df = st.session_state.data_df
+            include_mask = full_df['Include in Fit'].astype(bool)
+            x_full, y_full = full_df['X'].to_numpy(), full_df['Y'].to_numpy()
+            x_err_full = safeguard_errors(np.abs(full_df['X_Err'].to_numpy()))
+            y_err_full = safeguard_errors(np.abs(full_df['Y_Err'].to_numpy()))
+
+            fig_initial, ax_initial = plt.subplots()
+            ax_initial.errorbar(x_full[include_mask], y_full[include_mask], yerr=y_err_full[include_mask], xerr=x_err_full[include_mask], fmt='o', linestyle='None', capsize=5, label='Included Data', zorder=5)
+            if np.sum(~include_mask) > 0:
+                 ax_initial.errorbar(x_full[~include_mask], y_full[~include_mask], yerr=y_err_full[~include_mask], xerr=x_err_full[~include_mask], fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', linestyle='None', capsize=5, label='Excluded Data', zorder=4)
+
+            ax_initial.set_xlabel(st.session_state.x_axis_label)
+            ax_initial.set_ylabel(st.session_state.y_axis_label)
+            ax_initial.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
+            ax_initial.grid(True, linestyle=':', alpha=0.7); ax_initial.legend()
+            plt.tight_layout(); st.pyplot(fig_initial); plt.close(fig_initial)
+        except Exception as plot_err:
+            st.error(f"Error generating initial plot: {plot_err}")
+
+        st.markdown("---")
+        st.subheader("Step 1: Enter Fit Details")
+        st.markdown("""**Instructions:** (etc.)""") # Instructions hidden for brevity
+
+        eq_string_input = st.text_input("Equation:", value=st.session_state.get('last_eq_input', ""), key="equation_input")
+        st.session_state.plot_title_input = st.text_input("Optional Plot Title:", value=st.session_state.get('plot_title_input', ""), key="plot_title_input_widget")
+
+        b_col1, b_col2 = st.columns(2)
+        with b_col1:
+            manual_fit_button = st.button("Set Equation & Try a Manual Fit", key="manual_fit_button")
+        with b_col2:
+            direct_autofit_button = st.button("Set Equation & Perform Autofit", key="direct_autofit_button")
+
+        if (manual_fit_button or direct_autofit_button) and eq_string_input:
+            st.session_state.last_eq_input = eq_string_input
+            if 'fit_results' in st.session_state: del st.session_state.fit_results
+            if 'final_fig' in st.session_state: del st.session_state.final_fig
+            validation_passed = False
+            with st.spinner("Validating equation..."):
+                try:
+                    processed_eq, params_list = validate_and_parse_equation(eq_string_input)
+                    st.session_state.processed_eq_string = processed_eq
+                    st.session_state.params = params_list
+                    st.session_state.fit_func = create_fit_function(processed_eq, params_list)
+                    st.session_state.legend_label_str = format_equation_mathtext(processed_eq)
+                    validation_passed = True
+                except Exception as e:
+                    st.error(f"Input Error: {e}")
+            
+            if validation_passed:
+                if manual_fit_button:
+                    st.session_state.show_guess_stage = True
+                    st.rerun()
+                elif direct_autofit_button:
+                    guesses = [1.0] * len(st.session_state.params)
+                    if perform_the_autofit(guesses):
+                        st.session_state.show_guess_stage = False
+                        st.rerun()
+                    else:
+                        st.warning("Automatic fit failed. Please provide a manual starting fit.")
+                        for i, param in enumerate(st.session_state.params): st.session_state[f"init_guess_{param}"] = guesses[i]
+                        st.session_state.show_guess_stage = True
+                        st.rerun()
 
 # --- Footer ---
 st.markdown("---")
