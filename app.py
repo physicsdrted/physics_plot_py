@@ -150,17 +150,31 @@ def {func_name}(x, {param_str}):
     return local_namespace[func_name]
 
 def numerical_derivative(func, x, params, h=1e-7):
-    """Calculates the numerical derivative of the fit function using the central difference method."""
+    """
+    Calculates the numerical derivative using the central difference method.
+    Safely handles both scalar and array inputs for 'x'.
+    """
     try:
-        if params is None or not all(np.isfinite(p) for p in params): return np.zeros_like(x)
+        if params is None or not all(np.isfinite(p) for p in params):
+            return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
+
+        # This calculation works correctly for both scalar and array inputs.
         y_plus_h = func(x + h, *params)
         y_minus_h = func(x - h, *params)
         deriv = (y_plus_h - y_minus_h) / (2 * h)
-        deriv[~np.isfinite(deriv)] = 0
+
+        # Sanitize the result: check if it's an array before trying to access elements.
+        if isinstance(deriv, np.ndarray):
+            # If it's an array, replace any non-finite values with zero.
+            deriv[~np.isfinite(deriv)] = 0
+        elif not np.isfinite(deriv):
+            # If it's a scalar (float), just reassign it to zero if it's not finite.
+            deriv = 0
+        
         return deriv
     except Exception as e:
         st.warning(f"Derivative calculation failed: {e}. Returning slope=0.")
-        return np.zeros_like(x)
+        return np.zeros_like(x) if isinstance(x, np.ndarray) else 0
 
 def safeguard_errors(err_array, min_err=1e-9):
     """Replaces non-positive or non-finite errors with a small positive number to avoid division by zero."""
