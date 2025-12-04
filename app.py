@@ -52,8 +52,7 @@ def format_value_uncertainty(value, uncertainty):
 
     # Determine the engineering exponent (a multiple of 3) for the uncertainty.
     exponent_of_unc = np.floor(np.log10(abs(uncertainty)))
-    # eng_exponent = int(3 * np.floor(exponent_of_unc / 3)) + 3
-    eng_exponent = int(3 * np.floor(exponent_of_unc / 3))
+    eng_exponent = int(3 * np.floor(exponent_of_unc / 3)) + 3
 
     # Scale the value and uncertainty to this exponent.
     scaler = 10**(-eng_exponent)
@@ -216,20 +215,18 @@ def recreate_final_figure(xlim=None, ylim=None):
     gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
     ax0 = fig.add_subplot(gs[0])
 
-    # Plot included data points (solid markers).
-    ax0.errorbar(
-        full_df.loc[include_mask, 'X'], full_df.loc[include_mask, 'Y'],
-        yerr=full_df.loc[include_mask, 'Y_Err'], xerr=full_df.loc[include_mask, 'X_Err'],
-        fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5
-    )
-    # Plot excluded data points (hollow markers).
-    if not include_mask.all():
-        ax0.errorbar(
-            full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'],
-            yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
-            fmt='o', markerfacecolor='none', markeredgecolor='gray', markersize=4,
-            linestyle='None', capsize=3, label='Excluded Data', ecolor='gray', zorder=4
-        )
+    # Conditionally plot data based on whether any points are excluded.
+    if include_mask.all():
+        ax0.errorbar(full_df['X'], full_df['Y'], yerr=full_df['Y_Err'], xerr=full_df['X_Err'],
+                     fmt='o', markersize=4, linestyle='None', capsize=3, label='Data', zorder=5)
+    else:
+        ax0.errorbar(full_df.loc[include_mask, 'X'], full_df.loc[include_mask, 'Y'],
+                     yerr=full_df.loc[include_mask, 'Y_Err'], xerr=full_df.loc[include_mask, 'X_Err'],
+                     fmt='o', markersize=4, linestyle='None', capsize=3, label='Included Data', zorder=5)
+        ax0.errorbar(full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'],
+                     yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
+                     fmt='o', markerfacecolor='none', markeredgecolor='gray', markersize=4,
+                     linestyle='None', capsize=3, label='Excluded Data', ecolor='gray', zorder=4)
 
     # Generate and plot the smooth best-fit curve.
     x_min_plot = xlim[0] if xlim else full_df['X'].min()
@@ -627,10 +624,18 @@ if st.session_state.get('data_loaded'):
             fig_preview = plt.figure()
             gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             ax0 = fig_preview.add_subplot(gs[0])
-            ax0.errorbar(fit_df['X'], fit_df['Y'], yerr=fit_df['Y_Err'], xerr=fit_df['X_Err'], fmt='o', label='Included Data', zorder=5)
-            if not include_mask.all():
-                ax0.errorbar(full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'], yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
-                             fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', label='Excluded Data', zorder=4)
+            
+            if include_mask.all():
+                ax0.errorbar(full_df['X'], full_df['Y'], yerr=full_df['Y_Err'], xerr=full_df['X_Err'],
+                             fmt='o', label='Data', zorder=5)
+            else:
+                ax0.errorbar(fit_df['X'], fit_df['Y'], yerr=fit_df['Y_Err'], xerr=fit_df['X_Err'],
+                             fmt='o', label='Included Data', zorder=5)
+                ax0.errorbar(full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'],
+                             yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
+                             fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray',
+                             label='Excluded Data', zorder=4)
+
             x_curve = np.linspace(full_df['X'].min(), full_df['X'].max(), 200)
             ax0.plot(x_curve, fit_func(x_curve, *guess_vals), 'r--', label="Manual Guess", zorder=10)
             
@@ -663,10 +668,19 @@ if st.session_state.get('data_loaded'):
             full_df = st.session_state.data_df
             include_mask = full_df['Include in Fit'].astype(bool)
             fig, ax = plt.subplots()
-            ax.errorbar(full_df.loc[include_mask, 'X'], full_df.loc[include_mask, 'Y'], yerr=full_df.loc[include_mask, 'Y_Err'], xerr=full_df.loc[include_mask, 'X_Err'], fmt='o', capsize=5, label='Included Data')
-            if not include_mask.all():
-                 ax.errorbar(full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'], yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
-                             fmt='o', markerfacecolor='none', markeredgecolor='gray', ecolor='gray', capsize=5, label='Excluded Data')
+
+            if include_mask.all():
+                ax.errorbar(full_df['X'], full_df['Y'], yerr=full_df['Y_Err'], xerr=full_df['X_Err'],
+                            fmt='o', capsize=5, label='Data')
+            else:
+                ax.errorbar(full_df.loc[include_mask, 'X'], full_df.loc[include_mask, 'Y'],
+                            yerr=full_df.loc[include_mask, 'Y_Err'], xerr=full_df.loc[include_mask, 'X_Err'],
+                            fmt='o', capsize=5, label='Included Data')
+                ax.errorbar(full_df.loc[~include_mask, 'X'], full_df.loc[~include_mask, 'Y'],
+                            yerr=full_df.loc[~include_mask, 'Y_Err'], xerr=full_df.loc[~include_mask, 'X_Err'],
+                            fmt='o', markerfacecolor='none', markeredgecolor='gray',
+                            ecolor='gray', capsize=5, label='Excluded Data')
+
             ax.set_xlabel(st.session_state.x_axis_label); ax.set_ylabel(st.session_state.y_axis_label)
             ax.set_title(f"{st.session_state.y_axis_label} vs {st.session_state.x_axis_label} (Raw Data)")
             ax.grid(True, linestyle=':', alpha=0.7); ax.legend()
