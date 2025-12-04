@@ -348,7 +348,7 @@ def reset_fit_state():
     """Clears all session state variables related to a specific fit, preparing for a new one."""
     keys_to_delete = [
         'fit_results', 'final_fig', 'processed_eq_string', 'params', 'fit_func',
-        'legend_label_str', 'plot_title_input', 'last_eq_input', 'show_guess_stage',
+        'legend_label_str', 'plot_title_input', 'show_guess_stage',
         'auto_limits', 'xlim_current', 'ylim_current', 'include_origin_checkbox'
     ]
     for key in keys_to_delete:
