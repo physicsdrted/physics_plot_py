@@ -400,8 +400,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.processed_file_key = None
     st.session_state.df_head = None
     
-    # NEW: Variables to hold manual input strings and data source
-    st.session_state.data_source = None
+    # MODIFICATION: Add state for active tab and manual input fields
+    st.session_state.active_data_tab = "Upload CSV File"
     st.session_state.manual_x_label = "time (s)"
     st.session_state.manual_y_label = "height (m)"
     st.session_state.manual_x_data_str = "0.0\n0.05\n0.1\n0.15\n0.2\n0.25\n0.3"
@@ -425,11 +425,18 @@ if 'plot_title_input' not in st.session_state:
 if 'uploader_key_counter' not in st.session_state:
     st.session_state.uploader_key_counter = 0
 
-
 # --- Data Input Section ---
-tab1, tab2 = st.tabs(["Upload CSV File", "Enter Data Manually"])
 
-with tab1:
+# MODIFICATION: Use st.radio to allow programmatic tab switching
+selected_tab = st.radio(
+    "Data Input Method",
+    ["Upload CSV File", "Enter Data Manually"],
+    key='active_data_tab',
+    horizontal=True,
+    label_visibility="collapsed" # Hides the "Data Input Method" label to look like tabs
+)
+
+if selected_tab == "Upload CSV File":
     st.write("Upload a 4-column CSV (Labels in Row 1: X, X_Err, Y, Y_Err; Data from Row 2).")
     
     @st.cache_data
@@ -453,7 +460,6 @@ with tab1:
         icon=":material/download:",
     )
 
-    # Use a dynamic key for the file uploader
     uploader_key = f"file_uploader_{st.session_state.uploader_key_counter}"
     uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key=uploader_key)
     
@@ -495,9 +501,8 @@ with tab1:
                 st.session_state.df_head = df.head(10)
                 st.session_state.data_loaded = True
                 st.session_state.processed_file_key = current_file_key
-                st.session_state.data_source = 'csv'
-
-                # MODIFICATION: Populate manual entry fields with CSV data
+                
+                # Populate manual entry fields with CSV data
                 st.session_state.manual_x_label = x_label
                 st.session_state.manual_y_label = y_label
                 st.session_state.manual_x_data_str = "\n".join(df['x'].astype(str))
@@ -505,69 +510,59 @@ with tab1:
                 st.session_state.manual_y_data_str = "\n".join(df['y'].astype(str))
                 st.session_state.manual_y_err_str = "\n".join(df['y_err'].astype(str))
                 
-                st.success("Data loaded successfully!")
-                st.info("Data has been pre-populated in the 'Enter Data Manually' tab for review or editing.")
+                # MODIFICATION: This is the key change to switch the tab
+                st.session_state.active_data_tab = "Enter Data Manually"
+                st.success("Data loaded and pre-populated for editing.")
                 st.rerun()
 
             except Exception as e:
                 st.error(f"An unexpected error occurred while processing the file: {e}")
                 st.session_state.data_loaded = False; st.session_state.processed_file_key = None; st.stop()
 
-with tab2:
+elif selected_tab == "Enter Data Manually":
     st.write("Enter data and axis labels below. Separate numbers with spaces, commas, or new lines.")
     with st.form("manual_data_form"):
         # Text inputs for labels
         label_col1, label_col2 = st.columns(2)
         with label_col1:
-            # MODIFICATION: Use session state to pre-populate value
             x_label_manual = st.text_input("X-Axis Label", value=st.session_state.manual_x_label)
         with label_col2:
-            # MODIFICATION: Use session state to pre-populate value
             y_label_manual = st.text_input("Y-Axis Label", value=st.session_state.manual_y_label)
 
         # Text areas for data columns
         data_col1, data_col2, data_col3, data_col4 = st.columns(4)
         with data_col1:
-            # MODIFICATION: Use session state to pre-populate value
             x_data_manual = st.text_area("X-Values", value=st.session_state.manual_x_data_str)
         with data_col2:
-            # MODIFICATION: Use session state to pre-populate value
             x_err_manual = st.text_area("X-Uncertainties", value=st.session_state.manual_x_err_str)
         with data_col3:
-            # MODIFICATION: Use session state to pre-populate value
             y_data_manual = st.text_area("Y-Values", value=st.session_state.manual_y_data_str)
         with data_col4:
-            # MODIFICATION: Use session state to pre-populate value
             y_err_manual = st.text_area("Y-Uncertainties", value=st.session_state.manual_y_err_str)
         
-        submitted = st.form_submit_button("Load Manual Data")
+        submitted = st.form_submit_button("Load/Update Data")
 
     if submitted:
         try:
-            # Step 1: Parse all data from text areas
+            # Parse all data from text areas
             x_dat = parse_data_string(x_data_manual)
             y_dat = parse_data_string(y_data_manual)
             x_err = parse_data_string(x_err_manual)
             y_err = parse_data_string(y_err_manual)
             
-            # Step 2: Validate the parsed data
+            # Validate the parsed data
             if not x_dat or not y_dat:
                 st.error("X-Values and Y-Values cannot be empty."); st.stop()
 
-            # Handle single uncertainty values by broadcasting them to the full data length
+            # Handle single uncertainty values by broadcasting
             if len(x_err) == 1: x_err = [x_err[0]] * len(x_dat)
             if len(y_err) == 1: y_err = [y_err[0]] * len(y_dat)
 
-            # Check for consistent lengths
             if not (len(x_dat) == len(y_dat) == len(x_err) == len(y_err)):
-                st.error(f"Data length mismatch! X: {len(x_dat)}, Y: {len(y_dat)}, X_Err: {len(x_err)}, Y_Err: {len(y_err)}. All columns must have the same number of entries (a single uncertainty value is applied to all points).")
-                st.stop()
+                st.error(f"Data length mismatch! X: {len(x_dat)}, Y: {len(y_dat)}, X_Err: {len(x_err)}, Y_Err: {len(y_err)}."); st.stop()
             
-            # Step 3: Data is valid. Unconditionally reset the application state.
-            st.info("Processing manual data...")
-            
+            st.info("Processing data...")
             st.session_state.uploader_key_counter += 1
-            
             st.session_state.fit_results = None
             st.session_state.final_fig = None
             st.session_state.show_guess_stage = False
@@ -578,12 +573,9 @@ with tab2:
             st.session_state.plot_title_input = ""
             st.session_state.last_eq_input = ""
             keys_to_remove = [k for k in st.session_state if k.startswith("init_guess_")]
-            for key in keys_to_remove:
-                del st.session_state[key]
+            for key in keys_to_remove: del st.session_state[key]
 
-            # Step 4: Load the new data into session_state
             df_manual = pd.DataFrame({'x': x_dat, 'x_err': x_err, 'y': y_dat, 'y_err': y_err})
-
             st.session_state.x_data = df_manual['x'].to_numpy()
             st.session_state.y_data = df_manual['y'].to_numpy()
             st.session_state.x_err_safe = safeguard_errors(np.abs(df_manual['x_err'].to_numpy()))
@@ -592,13 +584,11 @@ with tab2:
             st.session_state.y_axis_label = y_label_manual.strip() if y_label_manual.strip() else "Y"
             st.session_state.df_head = df_manual.head(10)
             
-            # Step 5: Set key, status, and update manual field states then rerun
             manual_data_key = f"manual_{x_label_manual}_{y_label_manual}_{x_data_manual}_{x_err_manual}_{y_data_manual}_{y_err_manual}"
             st.session_state.processed_file_key = manual_data_key
             st.session_state.data_loaded = True
-            st.session_state.data_source = 'manual'
             
-            # MODIFICATION: Persist the submitted text in the text boxes
+            # Persist the submitted text in the text boxes
             st.session_state.manual_x_label = x_label_manual
             st.session_state.manual_y_label = y_label_manual
             st.session_state.manual_x_data_str = x_data_manual
@@ -606,7 +596,7 @@ with tab2:
             st.session_state.manual_x_err_str = x_err_manual
             st.session_state.manual_y_err_str = y_err_manual
             
-            st.success("Manual data loaded successfully!")
+            st.success("Data loaded successfully!")
             st.rerun()
 
         except ValueError as e:
@@ -614,28 +604,16 @@ with tab2:
         except Exception as e:
             st.error(f"An unexpected error occurred: {e}")
 
-    # MODIFICATION: Add a download button for the current data
     if st.session_state.data_loaded:
         st.markdown("---")
         
         @st.cache_data
         def convert_current_data_to_csv(x_label, y_label, x_data, y_data, x_err, y_err):
-            # Create a dataframe from the current session state data
-            df_to_save = pd.DataFrame({
-                'x': x_data,
-                'x_err': x_err,
-                'y': y_data,
-                'y_err': y_err
-            })
-            
-            # Use StringIO to build the file in memory
+            df_to_save = pd.DataFrame({'x': x_data, 'x_err': x_err, 'y': y_data, 'y_err': y_err})
             output = io.StringIO()
-            # Write the custom header row with labels, compatible with the uploader
             header = f'"{x_label}"," ","{y_label}"," "'
             output.write(header + '\n')
-            # Append the data, without pandas writing its own header
             df_to_save.to_csv(output, index=False, header=False)
-            
             return output.getvalue().encode('utf-8')
 
         csv_to_download = convert_current_data_to_csv(
@@ -651,7 +629,6 @@ with tab2:
              mime="text/csv",
              help="Saves the currently loaded data (including any edits) to a CSV file."
         )
-
 # --- Main Application Flow (post-data-load) ---
 if st.session_state.data_loaded:
     if st.session_state.df_head is not None:
