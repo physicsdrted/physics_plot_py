@@ -629,21 +629,34 @@ if st.session_state.get('data_loaded'):
             full_df = st.session_state.data_df
             include_mask = full_df['Include in Fit'].astype(bool)
             fit_df = full_df[include_mask]
-            
+
+            # --- THIS IS THE FIX ---
+            # Convert pandas Series to NumPy arrays BEFORE calculations to avoid index alignment issues.
+            x_fit_preview = fit_df['X'].to_numpy()
+            y_fit_preview = fit_df['Y'].to_numpy()
+            x_err_preview = safeguard_errors(np.abs(fit_df['X_Err'].to_numpy()))
+            y_err_preview = safeguard_errors(np.abs(fit_df['Y_Err'].to_numpy()))
+            # --- END OF FIX ---
+
             guess_vals = [initial_guesses[p] for p in params]
-            residuals = fit_df['Y'] - fit_func(fit_df['X'], *guess_vals)
-            slopes = numerical_derivative(fit_func, fit_df['X'], guess_vals)
-            total_err = safeguard_errors(np.sqrt(fit_df['Y_Err']**2 + (slopes * fit_df['X_Err'])**2))
+            residuals = y_fit_preview - fit_func(x_fit_preview, *guess_vals)
+            slopes = numerical_derivative(fit_func, x_fit_preview, guess_vals)
+            total_err = safeguard_errors(np.sqrt(y_err_preview**2 + (slopes * x_err_preview)**2))
             dof = len(fit_df) - len(params)
             
-            if dof > 0: red_chi2 = np.sum((residuals / total_err)**2) / dof
-            else: red_chi2 = np.nan
+            if dof > 0:
+                chi2 = np.sum((residuals / total_err)**2)
+                red_chi2 = chi2 / dof
+            else:
+                red_chi2 = np.nan
+            
             st.metric("Manual Fit Reduced χ²/DoF", f"{red_chi2:.4f}", help=f"DoF = {dof}")
 
             fig_preview = plt.figure()
             gs = GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
             ax0 = fig_preview.add_subplot(gs[0])
             
+            # Use the full dataframe for plotting to show all points
             if include_mask.all():
                 ax0.errorbar(full_df['X'], full_df['Y'], yerr=full_df['Y_Err'], xerr=full_df['X_Err'],
                              fmt='o', label='Data', zorder=5)
@@ -664,7 +677,8 @@ if st.session_state.get('data_loaded'):
             ax0.tick_params(axis='x', labelbottom=False)
 
             ax1 = fig_preview.add_subplot(gs[1], sharex=ax0)
-            ax1.errorbar(fit_df['X'], residuals, yerr=total_err, fmt='o'); ax1.axhline(0, color='grey', ls='--')
+            # Use the numpy arrays for the residual plot
+            ax1.errorbar(x_fit_preview, residuals, yerr=total_err, fmt='o'); ax1.axhline(0, color='grey', ls='--')
             ax1.set_xlabel(st.session_state.x_axis_label); ax1.set_ylabel("Residuals"); ax1.grid(True, ls=':')
             st.pyplot(fig_preview); plt.close(fig_preview)
         except Exception as e:
