@@ -758,4 +758,4 @@ if st.session_state.get('data_loaded'):
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("Updated 12/4/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
+st.caption("Updated 12/26/2025 | [Old Version of Physics Plot](https://physicsplot.shinyapps.io/PhysicsPlot20231011/)")
