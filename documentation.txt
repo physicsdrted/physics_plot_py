@@ -25,7 +25,7 @@ Navigate to production folder:
 Pull the new requirements file:
   git pull
 Rebuild the image:
-  docker build -t physics-streamlit-app .
+  docker build --no-cache -t physics-streamlit-app .
 Restart both containers to use the new image:
   ~/start-physicsplot.sh
   ~/start-dev.sh
