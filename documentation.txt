@@ -1,0 +1,164 @@
+# Streamlit App Update Guide (from GitHub Changes)
+
+
+Three tasks:
+To update: cd ~/physicsplot/my_website_code && git pull
+To restart: docker compose restart
+To rebuild (if new libraries): docker compose up -d --build
+
+We started the Docker Image with the following command to make sure
+the code runs from the local linux code rather than directly from the
+github. We do NOT need to do this agian.
+
+docker run -d \
+  --name physics_app \
+  --restart unless-stopped \
+  -p 8501:8501 \
+  -v ~/physicsplot/my_website_code:/app \
+  physics-streamlit-app
+
+To update to the latest GitHub version:
+cd ~/physicsplot/my_website_code
+git pull
+
+You only need to go back to the old "docker build" method if you add a new library to your requirements.txt.
+
+
+## ignore most of the below
+
+
+This document provides step-by-step instructions for updating your Streamlit application
+on the server when changes have been pushed to your GitHub repository.
+
+This process involves:
+1.  Stopping and removing the currently running Docker container.
+2.  Rebuilding the Docker image to incorporate the latest code from GitHub.
+3.  Starting a new Docker container with the updated image and ensuring
+    it's configured for automatic restart.
+4.  Verifying the updated application.
+
+## Prerequisites:
+*   SSH access to your Ubuntu server.
+*   Your Dockerfile and associated files are located in a known directory on the server.
+*   The 'physics-streamlit-app' Docker image name is used for consistency.
+
+---
+
+## Step-by-Step Update Procedure
+
+### 1. SSH into Your Server
+
+Open your terminal and connect to your Ubuntu server:
+
+    ssh your_username@your_server_ip_or_domain
+
+    # Example:
+    # ssh ubuntu@192.168.1.100
+
+### 2. Navigate to the Dockerfile Directory
+
+Change your current directory to where your `Dockerfile` is located. This is the
+build context for your Docker image.
+
+    cd /path/to/your/Dockerfile/directory
+
+    # Example (if your Dockerfile is directly in /app):
+    # cd /app
+
+### 3. Identify the Currently Running Streamlit Container
+
+You need to know the ID or name of your active Streamlit container to stop it.
+
+    docker ps
+
+Look for an entry using your `physics-streamlit-app` image. Note down its
+`CONTAINER ID` or `NAMES`.
+
+    # Example Output:
+    # CONTAINER ID   IMAGE                 COMMAND                  CREATED        STATUS        PORTS                    NAMES
+    # a1b2c3d4e5f6   physics-streamlit-app "streamlit run app.py"   2 days ago     Up 2 days     0.0.0.0:8501->8501/tcp   friendly_name
+    #
+    # In this example, the ID is 'a1b2c3d4e5f6' and the Name is 'friendly_name'.
+
+### 4. Stop and Remove the Old Streamlit Container
+
+It's crucial to stop and remove the old container before building and running a new one
+to ensure you're using the updated code and to free up resources/ports.
+
+Use the `CONTAINER ID` or `NAMES` you found in the previous step.
+
+    docker stop [CONTAINER_ID_OR_NAME]
+    docker rm [CONTAINER_ID_OR_NAME]
+
+    # Example:
+    # docker stop a1b2c3d4e5f6
+    # docker rm a1b2c3d4e5f6
+
+    # Verify it's stopped and removed:
+    docker ps -a | grep physics-streamlit-app
+    # This command should return no output if the container is fully removed.
+
+### 5. Rebuild the Docker Image
+
+This step pulls the latest code from your GitHub repository (as defined by your
+`Dockerfile`'s `git clone` command) and creates a new Docker image.
+
+Make sure you are in the directory containing your `Dockerfile`.
+
+ docker build --no-cache -t physics-streamlit-app .
+
+    # Explanation:
+    #   -t physics-streamlit-app: Tags the new image with this name.
+    #   .: Specifies the current directory as the build context.
+
+    # This process will show output as Docker builds each layer.
+    # It will use cached layers where possible, speeding up subsequent builds
+    # if only the code has changed.
+
+### 6. Run the New Streamlit Container
+
+Now, start a new container from your freshly built image. This command also ensures
+that the container will automatically restart if the server reboots or if the
+application crashes.
+
+    docker run -d --restart unless-stopped -p 8501:8501 physics-streamlit-app
+
+    # Explanation:
+    #   -d: Runs the container in detached mode (in the background).
+    #   --restart unless-stopped: Configures Docker to automatically restart
+    #     this container after a reboot or if it exits, unless explicitly stopped.
+    #   -p 8501:8501: Maps port 8501 on your server (host) to port 8501
+    #     inside the container where Streamlit is listening.
+    #   physics-streamlit-app: The name of the Docker image to use.
+
+    # A new CONTAINER ID will be printed to your terminal.
+
+### 7. Verify the New Container and Application
+
+Perform checks to ensure your updated Streamlit app is running correctly.
+
+a.  **Check Docker Container Status:**
+    Confirm the new container is running:
+
+        docker ps
+
+    You should see your `physics-streamlit-app` listed with a `STATUS` of `Up ...`
+    and a recent `CREATED` time.
+
+b.  **Check Application Logs (Optional but recommended):**
+    To see if there are any startup errors or messages from your Streamlit app:
+
+        docker logs [NEW_CONTAINER_ID]
+
+    # Replace [NEW_CONTAINER_ID] with the ID from the previous 'docker ps' command.
+    # You can also use 'docker logs -f [NEW_CONTAINER_ID]' to follow logs in real-time.
+
+c.  **Access Your Streamlit App in a Browser:**
+    Open your web browser and navigate to your server's IP address or domain name.
+
+    e.g., `http://your_server_ip_or_domain`
+
+    Confirm that the new version of your Streamlit application is loading and
+    functioning as expected.
+
+---

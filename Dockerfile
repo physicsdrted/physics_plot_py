@@ -1,6 +1,6 @@
 # app/Dockerfile
 
-FROM python:3.9-slim
+FROM python:3.9-slim-bookworm
 
 WORKDIR /app
 
@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/physicsdrted/physics_plot_py .
+
+COPY requirements.txt .
 
 RUN pip3 install -r requirements.txt
 
