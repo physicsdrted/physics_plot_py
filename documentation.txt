@@ -1,32 +1,48 @@
-# Streamlit App Update Guide (from GitHub Changes)
+1. Daily Workflow (Updating the Website)
+Step A: Develop & Test
+ Edit files in ~/dev_code using VS Code.
+ Test changes instantly at https://physicsplot.com/dev.
+ When happy, commit and push changes to GitHub:
+     cd ~/dev_code
+     git commit -a -m "Description of change"
+     git push
+Step B: Deploy to Production
+ SSH into the server.
+ Pull the changes to the production folder (Updates website instantly):
+     cd ~/physicsplot && git pull
 
+2. Restarting the Server
+If the website crashes or the server reboots, use these scripts to restart the containers with the correct settings.
+Restart Production (physicsplot.com)
+    ~/start-physicsplot.sh
+Restart Development (physicsplot.com/dev)
+    ~/start-dev.sh
 
-Three tasks:
-To update: cd ~/physicsplot/my_website_code && git pull
-To restart: docker compose restart
-To rebuild (if new libraries): docker compose up -d --build
-
-We started the Docker Image with the following command to make sure
-the code runs from the local linux code rather than directly from the
-github. We do NOT need to do this agian.
-
-docker run -d \
-  --name physics_app \
-  --restart unless-stopped \
-  -p 8501:8501 \
-  -v ~/physicsplot/my_website_code:/app \
-  physics-streamlit-app
-
-To update to the latest GitHub version:
-cd ~/physicsplot/my_website_code
-git pull
-
-You only need to go back to the old "docker build" method if you add a new library to your requirements.txt.
+3. Adding New Libraries (Rebuilding)
+If you modify requirements.txt, you must rebuild the Docker image so the new libraries are installed.
+Navigate to production folder:
+  cd ~/physicsplot
+Pull the new requirements file:
+  git pull
+Rebuild the image:
+  docker build -t physics-streamlit-app .
+Restart both containers to use the new image:
+  ~/start-physicsplot.sh
+  ~/start-dev.sh
+4. Troubleshooting Reference
+Check Logs (If site gives 502 Bad Gateway)
+  docker logs physics_app   # Production logs
+  docker logs physics_dev   # Development logs
+Nginx Configuration
+The config is monolithic (all in one file).
+File location: /etc/nginx/nginx.conf
+Restart Nginx: sudo systemctl restart nginx
+Git Credentials
+Stored using a Personal Access Token (PAT).
+Helper: git config --global credential.helper store
 
 
 ## ignore most of the below
-
-
 This document provides step-by-step instructions for updating your Streamlit application
 on the server when changes have been pushed to your GitHub repository.
 
