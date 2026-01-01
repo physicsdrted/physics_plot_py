@@ -1,9 +1,0 @@
-services:
-  streamlit-app:
-    image: physics-streamlit-app
-    container_name: physics_app
-    restart: unless-stopped
-    ports:
-      - "8501:8501"
-    volumes:
-      - .:/app
