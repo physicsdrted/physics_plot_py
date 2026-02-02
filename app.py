@@ -216,7 +216,8 @@ def format_equation_mathtext(eq_string):
 
     # 2. Handle simple numeric or variable exponents: x**0.5 -> x^{0.5} or x**A -> x^{A}
     # This looks for ** followed by letters, numbers, dots, or underscores.
-    formatted = re.sub(r'\*\*([a-zA-Z0-9_\.]+)', r'^{\1}', formatted)
+    # Updated line to handle negative exponents (e.g., x^-2)
+    formatted = re.sub(r'\*\*([+\-]?[a-zA-Z0-9_\.]+)', r'^{\1}', formatted)
     # --- BUG FIX END ---
 
     formatted = formatted.replace('*', r'\cdot ')
