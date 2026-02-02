@@ -208,7 +208,18 @@ def format_equation_mathtext(eq_string):
         formatted = re.sub(pattern, repl, formatted, flags=re.IGNORECASE)
 
     formatted = formatted.replace('np.pi', r'\pi').replace('pi', r'\pi')
-    formatted = formatted.replace('**', '^').replace('*', r'\cdot ')
+    
+    # --- BUG FIX START ---
+    # 1. Handle exponents in parentheses: x**(1/2) -> x^{1/2}
+    # This captures everything inside the parens and puts it into curly braces.
+    formatted = re.sub(r'\*\*\((.*?)\)', r'^{\1}', formatted)
+
+    # 2. Handle simple numeric or variable exponents: x**0.5 -> x^{0.5} or x**A -> x^{A}
+    # This looks for ** followed by letters, numbers, dots, or underscores.
+    formatted = re.sub(r'\*\*([a-zA-Z0-9_\.]+)', r'^{\1}', formatted)
+    # --- BUG FIX END ---
+
+    formatted = formatted.replace('*', r'\cdot ')
     
     return f'$y = {formatted}$'
 
